@@ -12,12 +12,22 @@ let package = Package(
             name: "CurrentFeature",
             targets: ["CurrentFeature"]
         ),
+        .executable(
+            name: "CurrentFeatureChecks",
+            targets: ["CurrentFeatureChecks"]
+        ),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
         // Targets can depend on other targets in this package and products from dependencies.
         .target(
             name: "CurrentFeature"
+        ),
+        .executableTarget(
+            name: "CurrentFeatureChecks",
+            dependencies: [
+                "CurrentFeature"
+            ]
         ),
         .testTarget(
             name: "CurrentFeatureTests",

@@ -3,9 +3,14 @@ import CurrentFeature
 
 @main
 struct CurrentApp: App {
+    @StateObject private var controller = TimelineController()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(controller: controller)
+        }
+        .commands {
+            CurrentCommands(controller: controller)
         }
     }
 }
