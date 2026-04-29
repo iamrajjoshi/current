@@ -9,6 +9,7 @@ struct CurrentApp: App {
         WindowGroup {
             ContentView(controller: controller)
         }
+        .windowStyle(.hiddenTitleBar)
         .commands {
             CurrentCommands(controller: controller)
         }

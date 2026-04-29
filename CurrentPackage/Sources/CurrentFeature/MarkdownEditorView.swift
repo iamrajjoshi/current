@@ -28,6 +28,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
     var focusOnAppear: Bool
+    var minimumHeight: CGFloat = 72
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -52,8 +53,8 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
-        textView.backgroundColor = .clear
-        textView.drawsBackground = false
+        textView.backgroundColor = CurrentTheme.editorBackground
+        textView.drawsBackground = true
         textView.insertionPointColor = .labelColor
         textView.textContainerInset = NSSize(
             width: CurrentTheme.editorHorizontalInset,
@@ -142,7 +143,7 @@ struct MarkdownEditorView: NSViewRepresentable {
             textContainer.containerSize = NSSize(width: max(1, scrollView.contentSize.width), height: CGFloat.greatestFiniteMagnitude)
             layoutManager.ensureLayout(for: textContainer)
             let used = layoutManager.usedRect(for: textContainer)
-            let target = max(96, ceil(used.height + textView.textContainerInset.height * 2 + 8))
+            let target = max(parent.minimumHeight, ceil(used.height + textView.textContainerInset.height * 2 + 6))
             if abs(parent.measuredHeight - target) > 1 {
                 parent.measuredHeight = target
             }

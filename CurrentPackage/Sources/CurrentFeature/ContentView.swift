@@ -11,11 +11,13 @@ public struct ContentView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
+            topBar
+            hairline
             timeline
+            hairline
+            bottomBar
         }
-        .frame(minWidth: 760, minHeight: 620)
+        .frame(minWidth: 820, minHeight: 640)
         .background(CurrentTheme.pageBackground)
         .onAppear {
             controller.bootstrapIfNeeded()
@@ -36,32 +38,40 @@ public struct ContentView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Current")
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(CurrentTheme.text)
                 Text(controller.stream?.name ?? "Daily")
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
+                    .font(CurrentTheme.tinyLabel)
+                    .foregroundStyle(CurrentTheme.secondaryText)
             }
+            .frame(width: 120, alignment: .leading)
 
-            Spacer()
+            Spacer(minLength: 16)
 
             searchField
+
+            Spacer(minLength: 16)
 
             Button {
                 controller.jumpToToday()
             } label: {
-                Label("Jump to Today", systemImage: "scope")
+                Image(systemName: "scope")
+                    .frame(width: 26, height: 26)
             }
+            .buttonStyle(.plain)
             .help("Jump to Today")
 
             Button {
                 MarkdownTextView.insertTimestampIntoActiveEditor()
             } label: {
-                Label("Insert Timestamp", systemImage: "clock")
+                Image(systemName: "clock")
+                    .frame(width: 26, height: 26)
             }
+            .buttonStyle(.plain)
             .help("Insert Timestamp")
 
             Menu {
@@ -76,23 +86,29 @@ public struct ContentView: View {
                     revealStreamFiles()
                 }
             } label: {
-                Label("Stream Actions", systemImage: "ellipsis.circle")
+                Image(systemName: "ellipsis")
+                    .frame(width: 26, height: 26)
             }
+            .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .help("Stream Actions")
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 14)
-        .background(CurrentTheme.subtleBackground.opacity(0.4))
+        .foregroundStyle(CurrentTheme.secondaryText)
+        .padding(.leading, 92)
+        .padding(.trailing, 22)
+        .frame(height: 52)
+        .background(.ultraThinMaterial)
     }
 
     private var searchField: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 7) {
             Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.tertiary)
             TextField("Find loaded days", text: $controller.searchQuery)
                 .textFieldStyle(.plain)
-                .frame(width: 190)
+                .font(.system(size: 12))
+                .frame(width: 210)
                 .onSubmit {
                     controller.scrollToFirstSearchMatch()
                 }
@@ -100,39 +116,49 @@ public struct ContentView: View {
             let count = controller.searchMatchCount()
             if !controller.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Text("\(count)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.tertiary)
                     .monospacedDigit()
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .frame(height: 28)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
     }
 
     private var timeline: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0, pinnedViews: []) {
-                    LoadOlderView {
-                        controller.loadOlderDays()
-                    }
-                    .padding(.top, 12)
+                HStack(alignment: .top, spacing: 0) {
+                    Spacer(minLength: 0)
 
-                    ForEach(controller.days) { document in
-                        DaySectionView(
-                            document: document,
-                            isToday: Calendar.current.isDate(document.date, inSameDayAs: controller.today),
-                            searchQuery: controller.searchQuery,
-                            onChange: { text in
-                                controller.updateText(for: document.date, text: text)
-                            }
-                        )
-                        .id(document.id)
+                    LazyVStack(spacing: 0) {
+                        LoadOlderView {
+                            controller.loadOlderDays()
+                        }
+
+                        ForEach(displayedDays) { document in
+                            DaySectionView(
+                                document: document,
+                                isToday: Calendar.current.isDate(document.date, inSameDayAs: controller.today),
+                                searchQuery: controller.searchQuery,
+                                onChange: { text in
+                                    controller.updateText(for: document.date, text: text)
+                                }
+                            )
+                            .id(document.id)
+                        }
                     }
+                    .frame(maxWidth: CurrentTheme.contentMaxWidth, alignment: .leading)
+
+                    Spacer(minLength: 0)
                 }
-                .padding(.bottom, 36)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, 56)
+                .padding(.top, 28)
+                .padding(.bottom, 30)
             }
+            .background(CurrentTheme.pageBackground)
             .onChange(of: controller.scrollTargetID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.25)) {
@@ -149,6 +175,66 @@ public struct ContentView: View {
         }
     }
 
+    private var bottomBar: some View {
+        HStack {
+            Text("Daily")
+                .font(CurrentTheme.tinyLabel)
+                .foregroundStyle(CurrentTheme.secondaryText)
+
+            Spacer()
+
+            Text(todayStats)
+                .font(.system(size: 11))
+                .foregroundStyle(.tertiary)
+                .monospacedDigit()
+
+            Spacer()
+
+            Button {
+                copy(controller.copyCurrentDayMarkdown())
+            } label: {
+                Image(systemName: "doc.on.doc")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Copy Current Day")
+
+            Button {
+                revealStreamFiles()
+            } label: {
+                Image(systemName: "folder")
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help("Reveal Stream Files")
+        }
+        .foregroundStyle(CurrentTheme.secondaryText)
+        .padding(.horizontal, 22)
+        .frame(height: 40)
+        .background(.ultraThinMaterial)
+    }
+
+    private var todayStats: String {
+        let text = controller.copyCurrentDayMarkdown()
+        let words = text.split { $0.isWhitespace }.count
+        let characters = text.count
+        return "\(words) words · \(characters) characters"
+    }
+
+    private var displayedDays: [DayDocument] {
+        controller.days.filter { document in
+            Calendar.current.isDate(document.date, inSameDayAs: controller.today)
+                || document.isDirty
+                || !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+    }
+
+    private var hairline: some View {
+        Rectangle()
+            .fill(CurrentTheme.divider)
+            .frame(height: 1)
+    }
+
     private func revealStreamFiles() {
         guard let stream = controller.stream else { return }
         NSWorkspace.shared.activateFileViewerSelecting([stream.rootURL])
@@ -162,23 +248,21 @@ public struct ContentView: View {
 
 struct LoadOlderView: View {
     var load: () -> Void
-    @State private var didAutoLoad = false
 
     var body: some View {
         Button {
             load()
         } label: {
-            Label("Load Earlier Days", systemImage: "arrow.up.to.line")
-                .font(.system(size: 12, weight: .medium))
+            HStack(spacing: 7) {
+                Image(systemName: "arrow.up")
+                Text("Earlier days")
+            }
+            .font(CurrentTheme.tinyLabel)
+            .foregroundStyle(.tertiary)
+            .padding(.vertical, 8)
         }
-        .buttonStyle(.borderless)
-        .foregroundStyle(.secondary)
-        .padding(.vertical, 10)
-        .onAppear {
-            guard !didAutoLoad else { return }
-            didAutoLoad = true
-            load()
-        }
+        .buttonStyle(.plain)
+        .padding(.bottom, 18)
     }
 }
 
@@ -189,7 +273,8 @@ struct DaySectionView: View {
     var onChange: (String) -> Void
 
     @State private var text: String
-    @State private var editorHeight: CGFloat = 140
+    @State private var editorHeight: CGFloat
+    @State private var isExpanded: Bool
 
     init(
         document: DayDocument,
@@ -201,60 +286,92 @@ struct DaySectionView: View {
         self.isToday = isToday
         self.searchQuery = searchQuery
         self.onChange = onChange
+        let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         _text = State(initialValue: document.text)
+        _editorHeight = State(initialValue: isToday && !hasText ? 280 : 74)
+        _isExpanded = State(initialValue: isToday || hasText)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 0) {
             dayDivider
-            MarkdownEditorView(
-                text: $text,
-                measuredHeight: $editorHeight,
-                focusOnAppear: isToday
-            )
-            .frame(minHeight: 112)
-            .frame(height: editorHeight)
-            .padding(.horizontal, 24)
+
+            if isExpanded {
+                editorSurface
+                    .padding(.top, 18)
+            }
         }
-        .padding(.vertical, 12)
-        .background(searchHit ? CurrentTheme.accent.opacity(0.05) : Color.clear)
+        .padding(.vertical, isExpanded ? 16 : 8)
+        .padding(.horizontal, 2)
+        .background(searchHit ? CurrentTheme.accent.opacity(0.055) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .onChange(of: text) { _, newText in
+            if !newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                isExpanded = true
+            }
             onChange(newText)
         }
         .onChange(of: document.text) { _, newText in
             if newText != text {
                 text = newText
+                if !newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    isExpanded = true
+                }
+            }
+        }
+    }
+
+    private var editorSurface: some View {
+        ZStack(alignment: .topLeading) {
+            MarkdownEditorView(
+                text: $text,
+                measuredHeight: $editorHeight,
+                focusOnAppear: isToday,
+                minimumHeight: minimumEditorHeight
+            )
+            .frame(height: editorHeight)
+
+            if isToday && text.isEmpty {
+                Text("Start writing...")
+                    .font(.system(size: CurrentTheme.editorFontSize, design: .monospaced))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, CurrentTheme.editorVerticalInset + 2)
+                    .allowsHitTesting(false)
             }
         }
     }
 
     private var dayDivider: some View {
-        HStack(spacing: 10) {
-            Rectangle()
-                .fill(CurrentTheme.divider)
-                .frame(height: 1)
-
+        Button {
+            if !isToday || !text.isEmpty {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            }
+        } label: {
             HStack(spacing: 8) {
                 Text(isToday ? "Today" : DayFormatting.visibleTitle(for: document.date))
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(isToday ? CurrentTheme.accent : CurrentTheme.secondaryText)
+                    .font(CurrentTheme.dayLabel)
+                    .foregroundStyle(isToday ? CurrentTheme.text.opacity(0.72) : CurrentTheme.secondaryText)
                     .lineLimit(1)
 
                 if document.isDirty {
-                    Text("Saving")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(.thinMaterial, in: Capsule())
+                    Circle()
+                        .fill(CurrentTheme.mutedAccent)
+                        .frame(width: 5, height: 5)
                 }
-            }
 
-            Rectangle()
-                .fill(CurrentTheme.divider)
-                .frame(height: 1)
+                Rectangle()
+                    .fill(CurrentTheme.divider)
+                    .frame(height: 1)
+            }
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 24)
+        .buttonStyle(.plain)
+    }
+
+    private var minimumEditorHeight: CGFloat {
+        if isToday && text.isEmpty { return 280 }
+        return 64
     }
 
     private var searchHit: Bool {
