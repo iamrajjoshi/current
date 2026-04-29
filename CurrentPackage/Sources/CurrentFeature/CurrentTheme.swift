@@ -17,10 +17,10 @@ enum CurrentTheme {
     static let secondaryText = Color.secondary
     static let accent = Color.accentColor
     static let mutedAccent = Color.accentColor.opacity(0.75)
-    static let contentMaxWidth: CGFloat = 720
+    static let contentMaxWidth: CGFloat = 680
 
     static let editorFontSize: CGFloat = 12
-    static let editorLineHeight: CGFloat = 22
+    static let editorLineHeight: CGFloat = 20
     static let editorHorizontalInset: CGFloat = 0
     static let editorVerticalInset: CGFloat = 6
     static var editorFont: NSFont {
@@ -30,11 +30,11 @@ enum CurrentTheme {
         NSFont.monospacedSystemFont(ofSize: editorFontSize, weight: .semibold)
     }
     static var editorHeadingFont: NSFont {
-        NSFont.monospacedSystemFont(ofSize: editorFontSize + 4, weight: .bold)
+        NSFont.monospacedSystemFont(ofSize: editorFontSize + 1, weight: .semibold)
     }
-    static let editorBaselineOffset: CGFloat = 2
-    static let tinyLabel = Font.system(size: 11, weight: .medium)
-    static let dayLabel = Font.system(size: 12, weight: .semibold)
+    static let editorBaselineOffset: CGFloat = 1
+    static let tinyLabel = Font.system(size: 10, weight: .medium)
+    static let dayLabel = Font.system(size: 10, weight: .semibold)
 }
 
 private extension NSAppearance {

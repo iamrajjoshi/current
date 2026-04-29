@@ -12,7 +12,6 @@ public struct ContentView: View {
     public var body: some View {
         VStack(spacing: 0) {
             topBar
-            hairline
             timeline
             hairline
             bottomBar
@@ -39,16 +38,11 @@ public struct ContentView: View {
     }
 
     private var topBar: some View {
-        HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text("Current")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(CurrentTheme.text)
-                Text(controller.stream?.name ?? "Daily")
-                    .font(CurrentTheme.tinyLabel)
-                    .foregroundStyle(CurrentTheme.secondaryText)
-            }
-            .frame(width: 120, alignment: .leading)
+        HStack(spacing: 8) {
+            Text(controller.stream?.name ?? "Daily")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(CurrentTheme.secondaryText)
+                .frame(width: 120, alignment: .leading)
 
             Spacer(minLength: 16)
 
@@ -60,7 +54,7 @@ public struct ContentView: View {
                 controller.jumpToToday()
             } label: {
                 Image(systemName: "scope")
-                    .frame(width: 26, height: 26)
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
             .help("Jump to Today")
@@ -69,7 +63,7 @@ public struct ContentView: View {
                 MarkdownTextView.insertTimestampIntoActiveEditor()
             } label: {
                 Image(systemName: "clock")
-                    .frame(width: 26, height: 26)
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
             .help("Insert Timestamp")
@@ -87,7 +81,7 @@ public struct ContentView: View {
                 }
             } label: {
                 Image(systemName: "ellipsis")
-                    .frame(width: 26, height: 26)
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
@@ -95,8 +89,8 @@ public struct ContentView: View {
         }
         .foregroundStyle(CurrentTheme.secondaryText)
         .padding(.leading, 92)
-        .padding(.trailing, 22)
-        .frame(height: 52)
+        .padding(.trailing, 20)
+        .frame(height: 40)
         .background(.ultraThinMaterial)
     }
 
@@ -107,8 +101,8 @@ public struct ContentView: View {
                 .foregroundStyle(.tertiary)
             TextField("Find loaded days", text: $controller.searchQuery)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .frame(width: 210)
+                .font(.system(size: 11))
+                .frame(width: 164)
                 .onSubmit {
                     controller.scrollToFirstSearchMatch()
                 }
@@ -121,9 +115,10 @@ public struct ContentView: View {
                     .monospacedDigit()
             }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 28)
-        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 7))
+        .padding(.horizontal, 8)
+        .frame(height: 24)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
+        .opacity(controller.searchQuery.isEmpty ? 0.65 : 1)
     }
 
     private var timeline: some View {
@@ -155,8 +150,8 @@ public struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 56)
-                .padding(.top, 28)
-                .padding(.bottom, 30)
+                .padding(.top, 22)
+                .padding(.bottom, 24)
             }
             .background(CurrentTheme.pageBackground)
             .onChange(of: controller.scrollTargetID) { _, id in
@@ -184,7 +179,7 @@ public struct ContentView: View {
             Spacer()
 
             Text(todayStats)
-                .font(.system(size: 11))
+                .font(.system(size: 10))
                 .foregroundStyle(.tertiary)
                 .monospacedDigit()
 
@@ -194,7 +189,7 @@ public struct ContentView: View {
                 copy(controller.copyCurrentDayMarkdown())
             } label: {
                 Image(systemName: "doc.on.doc")
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
             .help("Copy Current Day")
@@ -203,14 +198,14 @@ public struct ContentView: View {
                 revealStreamFiles()
             } label: {
                 Image(systemName: "folder")
-                    .frame(width: 24, height: 24)
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
             .help("Reveal Stream Files")
         }
         .foregroundStyle(CurrentTheme.secondaryText)
-        .padding(.horizontal, 22)
-        .frame(height: 40)
+        .padding(.horizontal, 20)
+        .frame(height: 34)
         .background(.ultraThinMaterial)
     }
 
@@ -255,10 +250,10 @@ struct LoadOlderView: View {
             }
             .font(CurrentTheme.tinyLabel)
             .foregroundStyle(.tertiary)
-            .padding(.vertical, 8)
+            .padding(.vertical, 6)
         }
         .buttonStyle(.plain)
-        .padding(.bottom, 18)
+        .padding(.bottom, 14)
     }
 }
 
@@ -294,10 +289,10 @@ struct DaySectionView: View {
 
             if isExpanded {
                 editorSurface
-                    .padding(.top, 18)
+                    .padding(.top, 14)
             }
         }
-        .padding(.vertical, isExpanded ? 16 : 8)
+        .padding(.vertical, isExpanded ? 12 : 6)
         .padding(.horizontal, 2)
         .background(searchHit ? CurrentTheme.accent.opacity(0.055) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .onChange(of: text) { _, newText in
@@ -347,7 +342,9 @@ struct DaySectionView: View {
             HStack(spacing: 8) {
                 Text(dayTitle)
                     .font(CurrentTheme.dayLabel)
-                    .foregroundStyle(isToday ? CurrentTheme.text.opacity(0.72) : CurrentTheme.secondaryText)
+                    .tracking(0.6)
+                    .textCase(.uppercase)
+                    .foregroundStyle(isToday ? CurrentTheme.secondaryText : CurrentTheme.secondaryText.opacity(0.72))
                     .lineLimit(1)
 
                 Rectangle()
@@ -366,9 +363,9 @@ struct DaySectionView: View {
 
     private var dayTitle: String {
         if isToday {
-            return "Today - \(DayFormatting.visibleTitle(for: document.date))"
+            return "Today · \(DayFormatting.shortTitle(for: document.date))"
         }
-        return DayFormatting.visibleTitle(for: document.date)
+        return DayFormatting.shortTitle(for: document.date)
     }
 
     private var searchHit: Bool {
