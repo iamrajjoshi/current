@@ -133,10 +133,6 @@ public struct ContentView: View {
                     Spacer(minLength: 0)
 
                     LazyVStack(spacing: 0) {
-                        LoadOlderView {
-                            controller.loadOlderDays()
-                        }
-
                         ForEach(displayedDays) { document in
                             DaySectionView(
                                 document: document,
@@ -147,6 +143,10 @@ public struct ContentView: View {
                                 }
                             )
                             .id(document.id)
+                        }
+
+                        LoadOlderView {
+                            controller.loadOlderDays()
                         }
                     }
                     .frame(maxWidth: CurrentTheme.contentMaxWidth, alignment: .leading)
@@ -162,7 +162,7 @@ public struct ContentView: View {
             .onChange(of: controller.scrollTargetID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.25)) {
-                    proxy.scrollTo(id, anchor: .bottom)
+                    proxy.scrollTo(id, anchor: .top)
                 }
             }
             .onChange(of: controller.searchQuery) { _, _ in
@@ -222,11 +222,7 @@ public struct ContentView: View {
     }
 
     private var displayedDays: [DayDocument] {
-        controller.days.filter { document in
-            Calendar.current.isDate(document.date, inSameDayAs: controller.today)
-                || document.isDirty
-                || !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }
+        controller.days
     }
 
     private var hairline: some View {
@@ -254,7 +250,7 @@ struct LoadOlderView: View {
             load()
         } label: {
             HStack(spacing: 7) {
-                Image(systemName: "arrow.up")
+                Image(systemName: "arrow.down")
                 Text("Earlier days")
             }
             .font(CurrentTheme.tinyLabel)
@@ -349,7 +345,7 @@ struct DaySectionView: View {
             }
         } label: {
             HStack(spacing: 8) {
-                Text(isToday ? "Today" : DayFormatting.visibleTitle(for: document.date))
+                Text(dayTitle)
                     .font(CurrentTheme.dayLabel)
                     .foregroundStyle(isToday ? CurrentTheme.text.opacity(0.72) : CurrentTheme.secondaryText)
                     .lineLimit(1)
@@ -372,6 +368,13 @@ struct DaySectionView: View {
     private var minimumEditorHeight: CGFloat {
         if isToday && text.isEmpty { return 280 }
         return 64
+    }
+
+    private var dayTitle: String {
+        if isToday {
+            return "Today - \(DayFormatting.visibleTitle(for: document.date))"
+        }
+        return DayFormatting.visibleTitle(for: document.date)
     }
 
     private var searchHit: Bool {

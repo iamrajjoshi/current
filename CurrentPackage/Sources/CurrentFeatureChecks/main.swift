@@ -6,6 +6,7 @@ struct CurrentFeatureChecks {
     static func main() async throws {
         try dayPathsUseTransparentDailyMarkdownLayout()
         try bootstrapCreatesDailyStreamAndTodayFile()
+        try loadOlderDaysAppendsPastBelowToday()
         try await autosaveWritesOnlyTheEditedDay()
         try rolloverCreatesANewTodayAndKeepsHistoryVisible()
         try streamStoreDetectsExternalConflictsBeforeOverwrite()
@@ -40,10 +41,32 @@ struct CurrentFeatureChecks {
         controller.bootstrapIfNeeded(now: now)
 
         try check(controller.stream?.name == "Daily", "Expected Daily stream")
-        try check(controller.days.map(\.id) == ["2026-04-27", "2026-04-28", "2026-04-29"], "Unexpected visible days")
+        try check(controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27"], "Unexpected visible days")
         try check(
             FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-29.md").path),
             "Today file was not created"
+        )
+    }
+
+    @MainActor
+    static func loadOlderDaysAppendsPastBelowToday() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let controller = TimelineController(
+            store: StreamStore(libraryRoot: root, calendar: calendar),
+            cache: DayCache(calendar: calendar),
+            recentDayCount: 2,
+            historyBatchSize: 3,
+            now: now
+        )
+        controller.bootstrapIfNeeded(now: now)
+
+        controller.loadOlderDays()
+
+        try check(
+            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25"],
+            "Older days should append below today in reverse chronological order"
         )
     }
 
@@ -88,7 +111,7 @@ struct CurrentFeatureChecks {
         controller.handleDayRollover(now: april30)
 
         try check(controller.today == calendar.startOfDay(for: april30), "Today did not roll forward")
-        try check(controller.days.map(\.id).contains("2026-04-30"), "New today is not visible")
+        try check(controller.days.map(\.id).first == "2026-04-30", "New today is not at the top")
         try check(
             FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-30.md").path),
             "Rolled-over day file was not created"

@@ -62,7 +62,7 @@ public final class TimelineController: ObservableObject {
             self.stream = stream
             today = calendar.startOfDay(for: now)
             visibleDates = (0..<recentDayCount)
-                .map { calendar.addingDays(-((recentDayCount - 1) - $0), to: today) }
+                .map { calendar.addingDays(-$0, to: today) }
             try loadVisibleDates(createToday: true)
             isBootstrapped = true
             jumpToToday()
@@ -77,14 +77,13 @@ public final class TimelineController: ObservableObject {
 
     public func loadOlderDays() {
         guard let stream else { return }
-        guard let first = visibleDates.first else { return }
+        guard let oldest = visibleDates.last else { return }
 
         let olderDates = (1...historyBatchSize)
-            .map { calendar.addingDays(-$0, to: first) }
-            .reversed()
+            .map { calendar.addingDays(-$0, to: oldest) }
 
         for date in olderDates where !visibleDates.contains(date) {
-            visibleDates.insert(date, at: 0)
+            visibleDates.append(date)
             do {
                 cache.insert(try store.loadDay(date, in: stream))
             } catch {
@@ -175,7 +174,7 @@ public final class TimelineController: ObservableObject {
         var cursor = calendar.addingDays(1, to: today)
         while cursor <= newToday {
             if !visibleDates.contains(cursor) {
-                visibleDates.append(cursor)
+                visibleDates.insert(cursor, at: 0)
             }
             do {
                 cache.insert(try store.loadDay(cursor, in: stream, createIfMissing: cursor == newToday))
@@ -196,7 +195,7 @@ public final class TimelineController: ObservableObject {
 
     public func jumpToToday() {
         if !visibleDates.contains(today) {
-            visibleDates.append(today)
+            visibleDates.insert(today, at: 0)
             do {
                 if let stream {
                     cache.insert(try store.loadDay(today, in: stream, createIfMissing: true))
