@@ -51,6 +51,45 @@ public final class StreamStore {
             .appendingPathComponent("\(DayFormatting.dayKey(for: normalized, calendar: calendar)).md")
     }
 
+    public func existingDayDates(
+        in stream: Stream,
+        before date: Date,
+        limit: Int
+    ) -> [Date] {
+        guard limit > 0,
+              let enumerator = fileManager.enumerator(
+                at: stream.rootURL,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+              ) else { return [] }
+
+        let cutoff = calendar.startOfDay(for: date)
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+
+        var dates: Set<Date> = []
+        for case let fileURL as URL in enumerator {
+            guard fileURL.pathExtension == "md",
+                  let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
+                  resourceValues.isRegularFile == true,
+                  let parsedDate = formatter.date(from: fileURL.deletingPathExtension().lastPathComponent) else {
+                continue
+            }
+
+            let normalized = calendar.startOfDay(for: parsedDate)
+            if normalized < cutoff {
+                dates.insert(normalized)
+            }
+        }
+
+        return dates
+            .sorted(by: >)
+            .prefix(limit)
+            .map { $0 }
+    }
+
     public func loadDay(
         _ date: Date,
         in stream: Stream,

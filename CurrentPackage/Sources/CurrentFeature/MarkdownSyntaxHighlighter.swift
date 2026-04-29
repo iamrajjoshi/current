@@ -23,7 +23,7 @@ final class MarkdownSyntaxHighlighter {
             protectedRanges: protectedRanges,
             groups: [
                 (1, [.foregroundColor: syntaxColor]),
-                (2, [.font: headingFont, .foregroundColor: NSColor.labelColor])
+                (2, [.font: headingFont, .foregroundColor: CurrentTheme.primaryTextColor])
             ]
         )
         applyGroups(
@@ -32,7 +32,7 @@ final class MarkdownSyntaxHighlighter {
             protectedRanges: protectedRanges,
             groups: [
                 (1, [.foregroundColor: syntaxColor]),
-                (2, [.foregroundColor: NSColor.secondaryLabelColor])
+                (2, [.foregroundColor: CurrentTheme.secondaryTextColor])
             ]
         )
         applyGroups(
@@ -48,7 +48,11 @@ final class MarkdownSyntaxHighlighter {
             protectedRanges: protectedRanges,
             groups: [
                 (1, [.foregroundColor: syntaxColor]),
-                (2, [.font: codeFont, .foregroundColor: codeColor, .backgroundColor: NSColor.labelColor.withAlphaComponent(0.06)]),
+                (2, [
+                    .font: codeFont,
+                    .foregroundColor: codeColor,
+                    .backgroundColor: CurrentTheme.inlineCodeBackgroundColor
+                ]),
                 (3, [.foregroundColor: syntaxColor])
             ]
         )
@@ -58,7 +62,7 @@ final class MarkdownSyntaxHighlighter {
             protectedRanges: protectedRanges,
             groups: [
                 (1, [.foregroundColor: syntaxColor]),
-                (2, [.foregroundColor: NSColor.systemBlue]),
+                (2, [.foregroundColor: CurrentTheme.accentColor]),
                 (3, [.foregroundColor: syntaxColor])
             ]
         )
@@ -88,11 +92,11 @@ final class MarkdownSyntaxHighlighter {
     }
 
     private var syntaxColor: NSColor {
-        NSColor.secondaryLabelColor.withAlphaComponent(0.68)
+        CurrentTheme.mutedTextColor
     }
 
     private var codeColor: NSColor {
-        NSColor.secondaryLabelColor
+        CurrentTheme.secondaryTextColor
     }
 
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
@@ -103,7 +107,7 @@ final class MarkdownSyntaxHighlighter {
 
         return [
             .font: baseFont,
-            .foregroundColor: NSColor.labelColor,
+            .foregroundColor: CurrentTheme.primaryTextColor,
             .paragraphStyle: paragraph,
             .baselineOffset: CurrentTheme.editorBaselineOffset
         ]

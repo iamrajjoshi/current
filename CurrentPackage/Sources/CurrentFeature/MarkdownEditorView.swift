@@ -7,6 +7,16 @@ extension Notification.Name {
 
 final class MarkdownTextView: NSTextView {
     weak static var activeEditor: MarkdownTextView?
+    var onFocus: (() -> Void)?
+
+    override func becomeFirstResponder() -> Bool {
+        let becameFirstResponder = super.becomeFirstResponder()
+        if becameFirstResponder {
+            Self.activeEditor = self
+            onFocus?()
+        }
+        return becameFirstResponder
+    }
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
@@ -58,6 +68,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     @Binding var measuredHeight: CGFloat
     var focusOnAppear: Bool
     var minimumHeight: CGFloat = 72
+    var onFocus: () -> Void = {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -65,6 +76,7 @@ struct MarkdownEditorView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let scrollView = NSScrollView()
+        scrollView.appearance = NSAppearance(named: .aqua)
         scrollView.hasVerticalScroller = false
         scrollView.hasHorizontalScroller = false
         scrollView.drawsBackground = false
@@ -72,6 +84,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         scrollView.borderType = .noBorder
 
         let textView = MarkdownTextView()
+        textView.appearance = NSAppearance(named: .aqua)
         textView.delegate = context.coordinator
         textView.isRichText = false
         textView.importsGraphics = false
@@ -84,7 +97,11 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.backgroundColor = CurrentTheme.editorBackground
         textView.drawsBackground = true
-        textView.insertionPointColor = .labelColor
+        textView.insertionPointColor = CurrentTheme.primaryTextColor
+        textView.textColor = CurrentTheme.primaryTextColor
+        textView.onFocus = {
+            context.coordinator.parent.onFocus()
+        }
         textView.textContainerInset = NSSize(
             width: CurrentTheme.editorHorizontalInset,
             height: CurrentTheme.editorVerticalInset
@@ -100,6 +117,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.string = text
 
         context.coordinator.textView = textView
+        context.coordinator.updateTypingAttributes(for: textView)
         context.coordinator.highlighter.highlight(textView.textStorage!)
         scrollView.documentView = textView
 
@@ -119,7 +137,15 @@ struct MarkdownEditorView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? MarkdownTextView else { return }
-        textView.insertionPointColor = .labelColor
+        scrollView.appearance = NSAppearance(named: .aqua)
+        textView.appearance = NSAppearance(named: .aqua)
+        textView.backgroundColor = CurrentTheme.editorBackground
+        textView.insertionPointColor = CurrentTheme.primaryTextColor
+        textView.textColor = CurrentTheme.primaryTextColor
+        textView.onFocus = {
+            context.coordinator.parent.onFocus()
+        }
+        context.coordinator.updateTypingAttributes(for: textView)
 
         if !context.coordinator.isUpdatingFromTextView, textView.string != text {
             context.coordinator.isUpdatingFromSwiftUI = true
@@ -149,7 +175,10 @@ struct MarkdownEditorView: NSViewRepresentable {
         }
 
         func textDidBeginEditing(_ notification: Notification) {
-            MarkdownTextView.activeEditor = notification.object as? MarkdownTextView
+            guard let textView = notification.object as? MarkdownTextView else { return }
+            MarkdownTextView.activeEditor = textView
+            parent.onFocus()
+            updateTypingAttributes(for: textView)
         }
 
         func textDidChange(_ notification: Notification) {
@@ -176,6 +205,19 @@ struct MarkdownEditorView: NSViewRepresentable {
             if abs(parent.measuredHeight - target) > 1 {
                 parent.measuredHeight = target
             }
+        }
+
+        func updateTypingAttributes(for textView: NSTextView) {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.minimumLineHeight = CurrentTheme.editorLineHeight
+            paragraph.maximumLineHeight = CurrentTheme.editorLineHeight
+            paragraph.lineBreakMode = .byWordWrapping
+            textView.typingAttributes = [
+                .font: CurrentTheme.editorFont,
+                .foregroundColor: CurrentTheme.primaryTextColor,
+                .paragraphStyle: paragraph,
+                .baselineOffset: CurrentTheme.editorBaselineOffset
+            ]
         }
     }
 }

@@ -11,9 +11,7 @@ public struct ContentView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            topBar
             timeline
-            hairline
             bottomBar
         }
         .frame(minWidth: 820, minHeight: 640)
@@ -37,90 +35,6 @@ public struct ContentView: View {
         }
     }
 
-    private var topBar: some View {
-        HStack(spacing: 8) {
-            Text(controller.stream?.name ?? "Daily")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(CurrentTheme.secondaryText)
-                .frame(width: 120, alignment: .leading)
-
-            Spacer(minLength: 16)
-
-            searchField
-
-            Spacer(minLength: 16)
-
-            Button {
-                controller.jumpToToday()
-            } label: {
-                Image(systemName: "scope")
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.plain)
-            .help("Jump to Today")
-
-            Button {
-                MarkdownTextView.insertTimestampIntoActiveEditor()
-            } label: {
-                Image(systemName: "clock")
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.plain)
-            .help("Insert Timestamp")
-
-            Menu {
-                Button("Copy Current Day") {
-                    copy(controller.copyCurrentDayMarkdown())
-                }
-                Button("Copy Visible Stream") {
-                    copy(controller.copyVisibleStreamMarkdown())
-                }
-                Divider()
-                Button("Reveal Stream Files") {
-                    revealStreamFiles()
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .help("Stream Actions")
-        }
-        .foregroundStyle(CurrentTheme.secondaryText)
-        .padding(.leading, 92)
-        .padding(.trailing, 20)
-        .frame(height: 40)
-        .background(.ultraThinMaterial)
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.tertiary)
-            TextField("Find loaded days", text: $controller.searchQuery)
-                .textFieldStyle(.plain)
-                .font(.system(size: 11))
-                .frame(width: 164)
-                .onSubmit {
-                    controller.scrollToFirstSearchMatch()
-                }
-
-            let count = controller.searchMatchCount()
-            if !controller.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                Text("\(count)")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.tertiary)
-                    .monospacedDigit()
-            }
-        }
-        .padding(.horizontal, 8)
-        .frame(height: 24)
-        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 6))
-        .opacity(controller.searchQuery.isEmpty ? 0.65 : 1)
-    }
-
     private var timeline: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -133,6 +47,9 @@ public struct ContentView: View {
                                 document: document,
                                 isToday: Calendar.current.isDate(document.date, inSameDayAs: controller.today),
                                 searchQuery: controller.searchQuery,
+                                onFocus: {
+                                    controller.setActiveDate(document.date)
+                                },
                                 onChange: { text in
                                     controller.updateText(for: document.date, text: text)
                                 }
@@ -140,8 +57,10 @@ public struct ContentView: View {
                             .id(document.id)
                         }
 
-                        LoadOlderView {
-                            controller.loadOlderDays()
+                        if controller.canLoadOlderDays {
+                            HistoryLoaderView(oldestDayID: displayedDays.last?.id) {
+                                controller.loadOlderDays()
+                            }
                         }
                     }
                     .frame(maxWidth: CurrentTheme.contentMaxWidth, alignment: .leading)
@@ -150,10 +69,11 @@ public struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 56)
-                .padding(.top, 22)
-                .padding(.bottom, 24)
+                .padding(.top, 44)
+                .padding(.bottom, 26)
             }
             .background(CurrentTheme.pageBackground)
+            .coordinateSpace(name: "timelineScroll")
             .onChange(of: controller.scrollTargetID) { _, id in
                 guard let id else { return }
                 withAnimation(.easeInOut(duration: 0.25)) {
@@ -171,46 +91,46 @@ public struct ContentView: View {
     }
 
     private var bottomBar: some View {
-        HStack {
-            Text("Daily")
-                .font(CurrentTheme.tinyLabel)
-                .foregroundStyle(CurrentTheme.secondaryText)
-
-            Spacer()
-
-            Text(todayStats)
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+        ZStack {
+            Text(activeStats)
+                .font(CurrentTheme.metadata)
+                .foregroundStyle(CurrentTheme.mutedText)
                 .monospacedDigit()
 
-            Spacer()
+            HStack {
+                Spacer()
 
-            Button {
-                copy(controller.copyCurrentDayMarkdown())
-            } label: {
-                Image(systemName: "doc.on.doc")
-                    .frame(width: 22, height: 22)
-            }
-            .buttonStyle(.plain)
-            .help("Copy Current Day")
+                Button {
+                    copy(controller.activeDocument?.text ?? "")
+                } label: {
+                    chromeIcon("doc.on.doc")
+                }
+                .buttonStyle(QuietChromeButtonStyle())
+                .help("Copy Active Day")
 
-            Button {
-                revealStreamFiles()
-            } label: {
-                Image(systemName: "folder")
-                    .frame(width: 22, height: 22)
+                Button {
+                    revealStreamFiles()
+                } label: {
+                    chromeIcon("folder")
+                }
+                .buttonStyle(QuietChromeButtonStyle())
+                .help("Reveal Stream Files")
             }
-            .buttonStyle(.plain)
-            .help("Reveal Stream Files")
+            .padding(.leading, 20)
+            .padding(.trailing, 18)
         }
         .foregroundStyle(CurrentTheme.secondaryText)
-        .padding(.horizontal, 20)
         .frame(height: 34)
-        .background(.ultraThinMaterial)
+        .background(CurrentTheme.chromeBackground)
+        .overlay(alignment: .top) {
+            Rectangle()
+                .fill(CurrentTheme.softDivider)
+                .frame(height: 1)
+        }
     }
 
-    private var todayStats: String {
-        let text = controller.copyCurrentDayMarkdown()
+    private var activeStats: String {
+        let text = controller.activeDocument?.text ?? ""
         let words = text.split { $0.isWhitespace }.count
         let characters = text.count
         return "\(words) words · \(characters) characters"
@@ -220,10 +140,12 @@ public struct ContentView: View {
         controller.days
     }
 
-    private var hairline: some View {
-        Rectangle()
-            .fill(CurrentTheme.divider)
-            .frame(height: 1)
+    private func chromeIcon(_ systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(CurrentTheme.iconButton)
+            .symbolRenderingMode(.hierarchical)
+            .frame(width: 24, height: 24)
+            .contentShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func revealStreamFiles() {
@@ -237,23 +159,96 @@ public struct ContentView: View {
     }
 }
 
-struct LoadOlderView: View {
+private struct QuietChromeButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .foregroundStyle(configuration.isPressed ? CurrentTheme.primaryText : CurrentTheme.secondaryText)
+            .background(
+                configuration.isPressed ? CurrentTheme.fieldBackgroundActive : Color.clear,
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+    }
+}
+
+struct HistoryLoaderView: View {
+    var oldestDayID: String?
     var load: () -> Void
+    @State private var lastRequestedOldestDayID: String?
+    @State private var currentOldestDayID: String?
+    @State private var currentMinY: CGFloat = .infinity
+    @State private var isArmed = true
+    @State private var autoFillTask: Task<Void, Never>?
+
+    private let triggerY: CGFloat = 760
+    private let resetY: CGFloat = 920
 
     var body: some View {
-        Button {
-            load()
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: "arrow.down")
-                Text("Earlier days")
-            }
-            .font(CurrentTheme.tinyLabel)
-            .foregroundStyle(.tertiary)
-            .padding(.vertical, 6)
+        GeometryReader { proxy in
+            Color.clear
+                .preference(
+                    key: HistoryLoaderOffsetKey.self,
+                    value: proxy.frame(in: .named("timelineScroll")).minY
+                )
         }
-        .buttonStyle(.plain)
-        .padding(.bottom, 14)
+        .frame(height: 120)
+        .onAppear {
+            currentOldestDayID = oldestDayID
+        }
+        .onDisappear {
+            autoFillTask?.cancel()
+            autoFillTask = nil
+        }
+        .onChange(of: oldestDayID) { _, newValue in
+            currentOldestDayID = newValue
+            if currentMinY < triggerY {
+                isArmed = true
+                loadIfNeeded()
+            }
+        }
+        .onPreferenceChange(HistoryLoaderOffsetKey.self) { minY in
+            currentMinY = minY
+
+            if minY > resetY {
+                isArmed = true
+                autoFillTask?.cancel()
+                autoFillTask = nil
+            }
+
+            if minY < triggerY {
+                loadIfNeeded()
+            }
+        }
+    }
+
+    private func loadIfNeeded() {
+        let targetOldestDayID = currentOldestDayID ?? oldestDayID
+        guard isArmed, let targetOldestDayID, targetOldestDayID != lastRequestedOldestDayID else { return }
+        isArmed = false
+        lastRequestedOldestDayID = targetOldestDayID
+        Task { @MainActor in
+            load()
+        }
+        scheduleAutoFillIfStillNearBottom()
+    }
+
+    private func scheduleAutoFillIfStillNearBottom() {
+        autoFillTask?.cancel()
+        autoFillTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 180_000_000)
+            guard !Task.isCancelled else { return }
+            if currentMinY < triggerY {
+                isArmed = true
+                loadIfNeeded()
+            }
+        }
+    }
+}
+
+private struct HistoryLoaderOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = .infinity
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 
@@ -261,6 +256,7 @@ struct DaySectionView: View {
     var document: DayDocument
     var isToday: Bool
     var searchQuery: String
+    var onFocus: () -> Void
     var onChange: (String) -> Void
 
     @State private var text: String
@@ -271,11 +267,13 @@ struct DaySectionView: View {
         document: DayDocument,
         isToday: Bool,
         searchQuery: String,
+        onFocus: @escaping () -> Void,
         onChange: @escaping (String) -> Void
     ) {
         self.document = document
         self.isToday = isToday
         self.searchQuery = searchQuery
+        self.onFocus = onFocus
         self.onChange = onChange
         let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         _text = State(initialValue: document.text)
@@ -292,9 +290,9 @@ struct DaySectionView: View {
                     .padding(.top, 14)
             }
         }
-        .padding(.vertical, isExpanded ? 12 : 6)
-        .padding(.horizontal, 2)
-        .background(searchHit ? CurrentTheme.accent.opacity(0.055) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+        .padding(.vertical, isExpanded ? 13 : 6)
+        .padding(.horizontal, 0)
+        .background(searchHit ? CurrentTheme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .onChange(of: text) { _, newText in
             if !newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 isExpanded = true
@@ -317,14 +315,15 @@ struct DaySectionView: View {
                 text: $text,
                 measuredHeight: $editorHeight,
                 focusOnAppear: isToday,
-                minimumHeight: minimumEditorHeight
+                minimumHeight: minimumEditorHeight,
+                onFocus: onFocus
             )
             .frame(height: editorHeight)
 
             if isToday && text.isEmpty {
                 Text("Start writing...")
                     .font(.system(size: CurrentTheme.editorFontSize, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(CurrentTheme.mutedText)
                     .padding(.top, CurrentTheme.editorVerticalInset + 2)
                     .allowsHitTesting(false)
             }
@@ -342,13 +341,13 @@ struct DaySectionView: View {
             HStack(spacing: 8) {
                 Text(dayTitle)
                     .font(CurrentTheme.dayLabel)
-                    .tracking(0.6)
+                    .tracking(0.7)
                     .textCase(.uppercase)
-                    .foregroundStyle(isToday ? CurrentTheme.secondaryText : CurrentTheme.secondaryText.opacity(0.72))
+                    .foregroundStyle(isToday ? CurrentTheme.secondaryText : CurrentTheme.mutedText)
                     .lineLimit(1)
 
                 Rectangle()
-                    .fill(CurrentTheme.divider)
+                    .fill(CurrentTheme.softDivider)
                     .frame(height: 1)
             }
             .contentShape(Rectangle())

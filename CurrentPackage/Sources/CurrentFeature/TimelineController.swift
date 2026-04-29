@@ -21,6 +21,8 @@ public final class TimelineController: ObservableObject {
     @Published public private(set) var today: Date
     @Published public private(set) var isBootstrapped = false
     @Published public private(set) var scrollTargetID: String?
+    @Published public private(set) var activeDate: Date?
+    @Published public private(set) var canLoadOlderDays = true
     @Published public var searchQuery = ""
     @Published public var notice: TimelineNotice?
 
@@ -28,6 +30,7 @@ public final class TimelineController: ObservableObject {
     public var cache: DayCache
     public var recentDayCount: Int
     public var historyBatchSize: Int
+    public var blankHistoryDayLimit: Int
     public var autosaveDelay: TimeInterval
 
     private var visibleDates: [Date] = []
@@ -39,6 +42,7 @@ public final class TimelineController: ObservableObject {
         cache: DayCache = DayCache(),
         recentDayCount: Int = 7,
         historyBatchSize: Int = 7,
+        blankHistoryDayLimit: Int = 45,
         autosaveDelay: TimeInterval = 0.55,
         now: Date = Date()
     ) {
@@ -46,6 +50,7 @@ public final class TimelineController: ObservableObject {
         self.cache = cache
         self.recentDayCount = recentDayCount
         self.historyBatchSize = historyBatchSize
+        self.blankHistoryDayLimit = blankHistoryDayLimit
         self.autosaveDelay = autosaveDelay
         self.calendar = store.calendar
         self.today = store.calendar.startOfDay(for: now)
@@ -63,6 +68,7 @@ public final class TimelineController: ObservableObject {
             today = calendar.startOfDay(for: now)
             visibleDates = (0..<recentDayCount)
                 .map { calendar.addingDays(-$0, to: today) }
+            canLoadOlderDays = true
             try loadVisibleDates(createToday: true)
             isBootstrapped = true
             jumpToToday()
@@ -79,8 +85,11 @@ public final class TimelineController: ObservableObject {
         guard let stream else { return }
         guard let oldest = visibleDates.last else { return }
 
-        let olderDates = (1...historyBatchSize)
-            .map { calendar.addingDays(-$0, to: oldest) }
+        let olderDates = nextOlderDates(before: oldest, in: stream)
+        guard !olderDates.isEmpty else {
+            canLoadOlderDays = false
+            return
+        }
 
         for date in olderDates where !visibleDates.contains(date) {
             visibleDates.append(date)
@@ -95,14 +104,48 @@ public final class TimelineController: ObservableObject {
             }
         }
 
+        canLoadOlderDays = olderDates.count == historyBatchSize
         publishDays()
+    }
+
+    private func nextOlderDates(before oldest: Date, in stream: Stream) -> [Date] {
+        guard historyBatchSize > 0 else { return [] }
+
+        let blankFloor = calendar.addingDays(-(max(1, blankHistoryDayLimit) - 1), to: today)
+        var olderDates: [Date] = []
+        var cursor = calendar.addingDays(-1, to: oldest)
+
+        while olderDates.count < historyBatchSize, cursor >= blankFloor {
+            if !visibleDates.contains(cursor) {
+                olderDates.append(cursor)
+            }
+            cursor = calendar.addingDays(-1, to: cursor)
+        }
+
+        let remaining = historyBatchSize - olderDates.count
+        guard remaining > 0 else { return olderDates }
+
+        let actualFileCutoff = olderDates.last ?? oldest
+        let actualFileDates = store.existingDayDates(in: stream, before: actualFileCutoff, limit: remaining)
+            .filter { !visibleDates.contains($0) && !olderDates.contains($0) }
+        olderDates.append(contentsOf: actualFileDates)
+        return olderDates
     }
 
     public func updateText(for date: Date, text: String) {
         let key = calendar.startOfDay(for: date)
         guard cache.updateText(for: key, text: text) != nil else { return }
+        activeDate = key
         publishDays()
         scheduleAutosave(for: key)
+    }
+
+    public func setActiveDate(_ date: Date) {
+        activeDate = calendar.startOfDay(for: date)
+    }
+
+    public var activeDocument: DayDocument? {
+        cache[activeDate ?? today] ?? cache[today]
     }
 
     public func save(_ date: Date) {

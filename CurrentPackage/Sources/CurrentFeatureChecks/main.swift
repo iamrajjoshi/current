@@ -7,6 +7,9 @@ struct CurrentFeatureChecks {
         try dayPathsUseTransparentDailyMarkdownLayout()
         try bootstrapCreatesDailyStreamAndTodayFile()
         try loadOlderDaysAppendsPastBelowToday()
+        try loadOlderDaysDoesNotCreateMissingDayFiles()
+        try loadOlderDaysStopsAtBlankHistoryLimit()
+        try loadOlderDaysKeepsOlderActualFilesReachable()
         try markdownListEditingContinuesCommonLists()
         try await autosaveWritesOnlyTheEditedDay()
         try rolloverCreatesANewTodayAndKeepsHistoryVisible()
@@ -69,6 +72,89 @@ struct CurrentFeatureChecks {
             controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25"],
             "Older days should append below today in reverse chronological order"
         )
+    }
+
+    @MainActor
+    static func loadOlderDaysDoesNotCreateMissingDayFiles() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let controller = TimelineController(
+            store: StreamStore(libraryRoot: root, calendar: calendar),
+            cache: DayCache(calendar: calendar),
+            recentDayCount: 2,
+            historyBatchSize: 5,
+            now: now
+        )
+        controller.bootstrapIfNeeded(now: now)
+
+        controller.loadOlderDays()
+
+        try check(
+            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
+            "Missing older days should appear in memory for scrollable history"
+        )
+        try check(
+            !FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-27.md").path),
+            "Scrolling history should not create missing day files"
+        )
+    }
+
+    @MainActor
+    static func loadOlderDaysStopsAtBlankHistoryLimit() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let controller = TimelineController(
+            store: StreamStore(libraryRoot: root, calendar: calendar),
+            cache: DayCache(calendar: calendar),
+            recentDayCount: 2,
+            historyBatchSize: 5,
+            blankHistoryDayLimit: 7,
+            now: now
+        )
+        controller.bootstrapIfNeeded(now: now)
+
+        controller.loadOlderDays()
+        controller.loadOlderDays()
+
+        try check(
+            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
+            "Blank placeholder history should stop at the configured runway"
+        )
+        try check(controller.canLoadOlderDays == false, "History loader should disable itself after the blank runway")
+        try check(
+            !FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-23.md").path),
+            "Blank runway days should stay in memory until edited"
+        )
+    }
+
+    @MainActor
+    static func loadOlderDaysKeepsOlderActualFilesReachable() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let store = StreamStore(libraryRoot: root, calendar: calendar)
+        let stream = try store.defaultStream()
+        let olderActualDate = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 1)))
+        try writeDay(olderActualDate, text: "Imported old note", stream: stream, store: store)
+        let controller = TimelineController(
+            store: store,
+            cache: DayCache(calendar: calendar),
+            recentDayCount: 2,
+            historyBatchSize: 5,
+            blankHistoryDayLimit: 4,
+            now: now
+        )
+        controller.bootstrapIfNeeded(now: now)
+
+        controller.loadOlderDays()
+
+        try check(
+            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-01"],
+            "Actual older Markdown files should remain reachable after the blank runway"
+        )
+        try check(controller.days.last?.text == "Imported old note", "Expected the older actual file to load")
     }
 
     static func markdownListEditingContinuesCommonLists() throws {
@@ -205,6 +291,12 @@ struct CurrentFeatureChecks {
             .appendingPathComponent("CurrentChecks-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.appendingPathComponent("Current", isDirectory: true)
+    }
+
+    static func writeDay(_ date: Date, text: String, stream: CurrentFeature.Stream, store: StreamStore) throws {
+        let url = store.dayURL(for: date, in: stream)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try text.write(to: url, atomically: true, encoding: .utf8)
     }
 
     static func fixedCalendar() -> Calendar {
