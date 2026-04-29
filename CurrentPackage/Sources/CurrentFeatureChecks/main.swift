@@ -7,6 +7,7 @@ struct CurrentFeatureChecks {
         try dayPathsUseTransparentDailyMarkdownLayout()
         try bootstrapCreatesDailyStreamAndTodayFile()
         try loadOlderDaysAppendsPastBelowToday()
+        try markdownListEditingContinuesCommonLists()
         try await autosaveWritesOnlyTheEditedDay()
         try rolloverCreatesANewTodayAndKeepsHistoryVisible()
         try streamStoreDetectsExternalConflictsBeforeOverwrite()
@@ -68,6 +69,36 @@ struct CurrentFeatureChecks {
             controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25"],
             "Older days should append below today in reverse chronological order"
         )
+    }
+
+    static func markdownListEditingContinuesCommonLists() throws {
+        try checkContinuation("- first", replacement: "\n- ")
+        try checkContinuation("- [x] done", replacement: "\n- [ ] ")
+        try checkContinuation("7. done", replacement: "\n8. ")
+
+        let emptyList = "- "
+        let emptyEdit = try require(MarkdownListEditing.continuationEdit(
+            in: emptyList,
+            selectedRange: NSRange(location: emptyList.utf16.count, length: 0)
+        ))
+        try check(emptyEdit.range == NSRange(location: 0, length: 2), "Empty list item should be removed")
+        try check(emptyEdit.replacement == "", "Empty list item should exit the list")
+
+        let fenced = "```\n- code"
+        let fencedEdit = MarkdownListEditing.continuationEdit(
+            in: fenced,
+            selectedRange: NSRange(location: fenced.utf16.count, length: 0)
+        )
+        try check(fencedEdit == nil, "Lists should not auto-continue inside fenced code")
+    }
+
+    static func checkContinuation(_ text: String, replacement: String) throws {
+        let edit = try require(MarkdownListEditing.continuationEdit(
+            in: text,
+            selectedRange: NSRange(location: text.utf16.count, length: 0)
+        ))
+        try check(edit.range == NSRange(location: text.utf16.count, length: 0), "Continuation should insert at cursor")
+        try check(edit.replacement == replacement, "Unexpected continuation replacement: \(edit.replacement)")
     }
 
     @MainActor

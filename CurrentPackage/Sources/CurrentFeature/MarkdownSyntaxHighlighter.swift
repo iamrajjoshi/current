@@ -36,11 +36,12 @@ final class MarkdownSyntaxHighlighter {
             ]
         )
         applyGroups(
-            pattern: #"(?m)^(\s*(?:[-*+]|\d+\.)\s+(?:\[[ xX]\]\s+)?)"#,
+            pattern: #"(?m)^([ \t]*(?:[-*+]|\d+\.)(?:[ \t]+\[[ xX]\])?[ \t]+)"#,
             to: textStorage,
             protectedRanges: protectedRanges,
             groups: [(1, [.foregroundColor: syntaxColor])]
         )
+        applyListParagraphStyles(to: textStorage, protectedRanges: protectedRanges)
         applyGroups(
             pattern: #"(`+)([^`\n]+)(\1)"#,
             to: textStorage,
@@ -108,6 +109,16 @@ final class MarkdownSyntaxHighlighter {
         ]
     }
 
+    private func listParagraphStyle(prefix: String) -> NSMutableParagraphStyle {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = CurrentTheme.editorLineHeight
+        paragraph.maximumLineHeight = CurrentTheme.editorLineHeight
+        paragraph.lineBreakMode = .byWordWrapping
+        paragraph.headIndent = ceil((prefix as NSString).size(withAttributes: [.font: baseFont]).width)
+        paragraph.firstLineHeadIndent = 0
+        return paragraph
+    }
+
     @discardableResult
     private func applyProtected(
         pattern: String,
@@ -166,6 +177,22 @@ final class MarkdownSyntaxHighlighter {
                 guard groupRange.location != NSNotFound, groupRange.length > 0 else { continue }
                 textStorage.addAttributes(attributes, range: groupRange)
             }
+        }
+    }
+
+    private func applyListParagraphStyles(to textStorage: NSTextStorage, protectedRanges: [NSRange]) {
+        let pattern = #"(?m)^([ \t]*(?:[-*+]|\d+\.)(?:[ \t]+\[[ xX]\])?[ \t]+)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+        let string = textStorage.string as NSString
+        let range = NSRange(location: 0, length: string.length)
+        regex.enumerateMatches(in: textStorage.string, range: range) { match, _, _ in
+            guard let match else { return }
+            guard !intersectsProtected(match.range, protectedRanges: protectedRanges) else { return }
+            let prefixRange = match.range(at: 1)
+            guard prefixRange.location != NSNotFound else { return }
+            let prefix = string.substring(with: prefixRange)
+            let lineRange = string.lineRange(for: match.range)
+            textStorage.addAttribute(.paragraphStyle, value: listParagraphStyle(prefix: prefix), range: lineRange)
         }
     }
 

@@ -350,12 +350,6 @@ struct DaySectionView: View {
                     .foregroundStyle(isToday ? CurrentTheme.text.opacity(0.72) : CurrentTheme.secondaryText)
                     .lineLimit(1)
 
-                if document.isDirty {
-                    Circle()
-                        .fill(CurrentTheme.mutedAccent)
-                        .frame(width: 5, height: 5)
-                }
-
                 Rectangle()
                     .fill(CurrentTheme.divider)
                     .frame(height: 1)

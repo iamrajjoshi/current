@@ -8,6 +8,28 @@ extension Notification.Name {
 final class MarkdownTextView: NSTextView {
     weak static var activeEditor: MarkdownTextView?
 
+    override func keyDown(with event: NSEvent) {
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        switch event.keyCode {
+        case 36 where modifiers.isEmpty,
+             76 where modifiers.isEmpty:
+            if apply(MarkdownListEditing.continuationEdit(in: string, selectedRange: selectedRange())) {
+                return
+            }
+        case 48 where modifiers.isEmpty || modifiers == .shift:
+            if apply(MarkdownListEditing.indentationEdit(
+                in: string,
+                selectedRange: selectedRange(),
+                outdent: modifiers == .shift
+            )) {
+                return
+            }
+        default:
+            break
+        }
+        super.keyDown(with: event)
+    }
+
     override func paste(_ sender: Any?) {
         if let text = MarkdownPasteConverter.bestString(from: NSPasteboard.general) {
             insertText(text, replacementRange: selectedRange())
@@ -21,6 +43,13 @@ final class MarkdownTextView: NSTextView {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
         editor.insertText("[\(formatter.string(from: Date()))] ", replacementRange: editor.selectedRange())
+    }
+
+    private func apply(_ edit: MarkdownListEditing.TextEdit?) -> Bool {
+        guard let edit else { return false }
+        insertText(edit.replacement, replacementRange: edit.range)
+        setSelectedRange(edit.selectedRangeAfterEdit)
+        return true
     }
 }
 
