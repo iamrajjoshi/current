@@ -20,6 +20,8 @@ struct CurrentFeatureChecks {
         try rowHeightCalculatorGrowsForMultilineText()
         try timelineLayoutMetricsCenterTheWritingColumn()
         try markdownListEditingContinuesCommonLists()
+        try markdownHeadingRenderingTracksNotionLikeShortcuts()
+        try markdownHeadingBackspaceExitsBlock()
         try await autosaveWritesOnlyTheEditedDay()
         try rolloverCreatesANewTodayAndKeepsHistoryVisible()
         try streamStoreDetectsExternalConflictsBeforeOverwrite()
@@ -404,6 +406,45 @@ struct CurrentFeatureChecks {
         ))
         try check(edit.range == NSRange(location: text.utf16.count, length: 0), "Continuation should insert at cursor")
         try check(edit.replacement == replacement, "Unexpected continuation replacement: \(edit.replacement)")
+    }
+
+    static func markdownHeadingRenderingTracksNotionLikeShortcuts() throws {
+        let emptyH1 = try require(MarkdownBlockRendering.headingLine(in: "# ", at: 2))
+        try check(emptyH1.level == 1, "Expected # + space to create an H1 line")
+        try check(emptyH1.contentRange.length == 0, "Empty heading shortcut should still render as a heading")
+
+        let h3 = try require(MarkdownBlockRendering.headingLine(in: "### Details", at: 4))
+        try check(h3.level == 3, "Expected ### + space to create an H3 line")
+        try check(h3.contentRange.location == 4, "Heading content should start after the marker and space")
+
+        let plainHash = MarkdownBlockRendering.headingLine(in: "#", at: 1)
+        try check(plainHash == nil, "A bare # should stay body text until space is typed")
+
+        let fenced = "```\n# code\n```"
+        let fencedHeading = MarkdownBlockRendering.headingLine(in: fenced, at: 5)
+        try check(fencedHeading == nil, "Headings should not render inside fenced code")
+    }
+
+    static func markdownHeadingBackspaceExitsBlock() throws {
+        let emptyEdit = try require(MarkdownBlockEditing.headingBackspaceEdit(
+            in: "# ",
+            selectedRange: NSRange(location: 2, length: 0)
+        ))
+        try check(emptyEdit.range == NSRange(location: 0, length: 2), "Backspace in an empty heading should remove the marker")
+        try check(emptyEdit.replacement == "", "Backspace should exit the empty heading")
+        try check(emptyEdit.selectedRangeAfterEdit == NSRange(location: 0, length: 0), "Cursor should return to the body line")
+
+        let titledEdit = try require(MarkdownBlockEditing.headingBackspaceEdit(
+            in: "## Title",
+            selectedRange: NSRange(location: 3, length: 0)
+        ))
+        try check(titledEdit.range == NSRange(location: 0, length: 3), "Backspace at heading content start should remove the prefix")
+
+        let midContentEdit = MarkdownBlockEditing.headingBackspaceEdit(
+            in: "## Title",
+            selectedRange: NSRange(location: 5, length: 0)
+        )
+        try check(midContentEdit == nil, "Backspace inside heading content should keep normal character deletion")
     }
 
     @MainActor

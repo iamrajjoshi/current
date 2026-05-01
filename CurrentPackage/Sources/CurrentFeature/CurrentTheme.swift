@@ -60,7 +60,47 @@ enum CurrentTheme {
         NSFont.monospacedSystemFont(ofSize: editorFontSize, weight: .semibold)
     }
     static var editorHeadingFont: NSFont {
-        NSFont.monospacedSystemFont(ofSize: editorFontSize + 1, weight: .semibold)
+        editorHeadingFont(level: 3)
+    }
+    static func editorHeadingFont(level: Int) -> NSFont {
+        NSFont.monospacedSystemFont(ofSize: editorHeadingFontSize(level: level), weight: .semibold)
+    }
+    static func editorHeadingLineHeight(level: Int) -> CGFloat {
+        switch level {
+        case 1:
+            return 28
+        case 2:
+            return 25
+        case 3:
+            return 23
+        default:
+            return editorLineHeight
+        }
+    }
+    static func editorHeadingSpacingBefore(level: Int) -> CGFloat {
+        switch level {
+        case 1:
+            return 8
+        case 2:
+            return 6
+        case 3:
+            return 3
+        default:
+            return 0
+        }
+    }
+    static func editorHeadingSpacingAfter(level: Int) -> CGFloat {
+        switch level {
+        case 1:
+            return 3
+        case 2:
+            return 2
+        default:
+            return 0
+        }
+    }
+    static func editorBoldFont(matching font: NSFont) -> NSFont {
+        NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .semibold)
     }
     static let editorBaselineOffset: CGFloat = 1
     static let streamLabel = Font.system(size: 11, weight: .medium)
@@ -69,6 +109,19 @@ enum CurrentTheme {
     static let tinyLabel = Font.system(size: 10, weight: .medium)
     static let metadata = Font.system(size: 10, weight: .regular)
     static let dayLabel = Font.system(size: 10.5, weight: .medium)
+}
+
+private func editorHeadingFontSize(level: Int) -> CGFloat {
+    switch level {
+    case 1:
+        return CurrentTheme.editorFontSize + 4
+    case 2:
+        return CurrentTheme.editorFontSize + 2
+    case 3:
+        return CurrentTheme.editorFontSize + 1
+    default:
+        return CurrentTheme.editorFontSize
+    }
 }
 
 private extension NSColor {
