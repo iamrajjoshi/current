@@ -2,7 +2,6 @@ import AppKit
 
 final class MarkdownSyntaxHighlighter {
     private let baseFont = CurrentTheme.editorFont
-    private let headingFont = CurrentTheme.editorHeadingFont
     private let codeFont = CurrentTheme.editorFont
 
     func highlight(_ textStorage: NSTextStorage) {
@@ -17,15 +16,7 @@ final class MarkdownSyntaxHighlighter {
             .foregroundColor: codeColor
         ])
 
-        applyGroups(
-            pattern: #"(?m)^(#{1,6}\s+)(.+)$"#,
-            to: textStorage,
-            protectedRanges: protectedRanges,
-            groups: [
-                (1, [.foregroundColor: syntaxColor]),
-                (2, [.font: headingFont, .foregroundColor: CurrentTheme.primaryTextColor])
-            ]
-        )
+        applyHeadingLines(to: textStorage, protectedRanges: protectedRanges)
         applyGroups(
             pattern: #"(?m)^(\s*>\s?)(.*)$"#,
             to: textStorage,
@@ -66,22 +57,31 @@ final class MarkdownSyntaxHighlighter {
                 (3, [.foregroundColor: syntaxColor])
             ]
         )
-        applyGroups(
-            pattern: #"(?<!\*)\*\*([^*\n]+)\*\*"#,
-            to: textStorage,
-            protectedRanges: protectedRanges,
-            groups: [(1, [.font: CurrentTheme.editorBoldFont])]
-        )
-        apply(pattern: #"(?<!\*)\*\*|\*\*"#, to: textStorage, protectedRanges: protectedRanges, attributes: [
+        applyUnderline(to: textStorage, protectedRanges: protectedRanges)
+        applyBold(pattern: #"(?<!\*)\*\*([^*\n]+)\*\*(?!\*)"#, to: textStorage, protectedRanges: protectedRanges)
+        apply(pattern: #"(?<!\*)\*\*|\*\*(?!\*)"#, to: textStorage, protectedRanges: protectedRanges, attributes: [
+            .foregroundColor: syntaxColor
+        ])
+        applyBold(pattern: #"(?<!_)__([^_\n]+)__(?!_)"#, to: textStorage, protectedRanges: protectedRanges)
+        apply(pattern: #"(?<!_)__|__(?!_)"#, to: textStorage, protectedRanges: protectedRanges, attributes: [
             .foregroundColor: syntaxColor
         ])
         applyGroups(
-            pattern: #"(?<!\*)\*([^*\n]+)\*"#,
+            pattern: #"(?<!\*)\*([^*\n]+)\*(?!\*)"#,
             to: textStorage,
             protectedRanges: protectedRanges,
             groups: [(1, [.obliqueness: 0.12])]
         )
         apply(pattern: #"(?<!\*)\*|\*(?!\*)"#, to: textStorage, protectedRanges: protectedRanges, attributes: [
+            .foregroundColor: syntaxColor
+        ])
+        applyGroups(
+            pattern: #"(?<!_)_([^_\n]+)_(?!_)"#,
+            to: textStorage,
+            protectedRanges: protectedRanges,
+            groups: [(1, [.obliqueness: 0.12])]
+        )
+        apply(pattern: #"(?<!_)_|_(?!_)"#, to: textStorage, protectedRanges: protectedRanges, attributes: [
             .foregroundColor: syntaxColor
         ])
         apply(pattern: #"(?m)^[-*_]{3,}\s*$"#, to: textStorage, protectedRanges: protectedRanges, attributes: [
@@ -120,6 +120,16 @@ final class MarkdownSyntaxHighlighter {
         paragraph.lineBreakMode = .byWordWrapping
         paragraph.headIndent = ceil((prefix as NSString).size(withAttributes: [.font: baseFont]).width)
         paragraph.firstLineHeadIndent = 0
+        return paragraph
+    }
+
+    private func headingParagraphStyle(level: Int) -> NSMutableParagraphStyle {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = CurrentTheme.editorHeadingLineHeight(level: level)
+        paragraph.maximumLineHeight = CurrentTheme.editorHeadingLineHeight(level: level)
+        paragraph.lineBreakMode = .byWordWrapping
+        paragraph.paragraphSpacingBefore = CurrentTheme.editorHeadingSpacingBefore(level: level)
+        paragraph.paragraphSpacing = CurrentTheme.editorHeadingSpacingAfter(level: level)
         return paragraph
     }
 
@@ -181,6 +191,71 @@ final class MarkdownSyntaxHighlighter {
                 guard groupRange.location != NSNotFound, groupRange.length > 0 else { continue }
                 textStorage.addAttributes(attributes, range: groupRange)
             }
+        }
+    }
+
+    private func applyHeadingLines(to textStorage: NSTextStorage, protectedRanges: [NSRange]) {
+        for heading in MarkdownBlockRendering.headingLines(in: textStorage.string) {
+            guard !intersectsProtected(heading.lineRange, protectedRanges: protectedRanges) else { continue }
+            let headingFont = CurrentTheme.editorHeadingFont(level: heading.level)
+
+            textStorage.addAttribute(.paragraphStyle, value: headingParagraphStyle(level: heading.level), range: heading.lineRange)
+            textStorage.addAttributes([
+                .font: headingFont,
+                .foregroundColor: syntaxColor
+            ], range: heading.prefixRange)
+
+            if heading.hasContent {
+                textStorage.addAttributes([
+                    .font: headingFont,
+                    .foregroundColor: CurrentTheme.primaryTextColor
+                ], range: heading.contentRange)
+            }
+        }
+    }
+
+    private func applyUnderline(to textStorage: NSTextStorage, protectedRanges: [NSRange]) {
+        let pattern = #"(<u>)([^<\n]+)(</u>)"#
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return }
+        let string = textStorage.string as NSString
+        let range = NSRange(location: 0, length: string.length)
+
+        regex.enumerateMatches(in: textStorage.string, range: range) { match, _, _ in
+            guard let match else { return }
+            guard !intersectsProtected(match.range, protectedRanges: protectedRanges) else { return }
+
+            let openRange = match.range(at: 1)
+            let contentRange = match.range(at: 2)
+            let closeRange = match.range(at: 3)
+            guard contentRange.location != NSNotFound, contentRange.length > 0 else { return }
+
+            textStorage.addAttributes([
+                .foregroundColor: syntaxColor
+            ], range: openRange)
+            textStorage.addAttributes([
+                .underlineStyle: NSUnderlineStyle.single.rawValue
+            ], range: contentRange)
+            textStorage.addAttributes([
+                .foregroundColor: syntaxColor
+            ], range: closeRange)
+        }
+    }
+
+    private func applyBold(pattern: String, to textStorage: NSTextStorage, protectedRanges: [NSRange]) {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
+        let string = textStorage.string as NSString
+        let range = NSRange(location: 0, length: string.length)
+
+        regex.enumerateMatches(in: textStorage.string, range: range) { match, _, _ in
+            guard let match else { return }
+            guard !intersectsProtected(match.range, protectedRanges: protectedRanges) else { return }
+            let contentRange = match.range(at: 1)
+            guard contentRange.location != NSNotFound, contentRange.length > 0 else { return }
+
+            let currentFont = textStorage.attribute(.font, at: contentRange.location, effectiveRange: nil) as? NSFont ?? baseFont
+            textStorage.addAttributes([
+                .font: CurrentTheme.editorBoldFont(matching: currentFont)
+            ], range: contentRange)
         }
     }
 

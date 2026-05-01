@@ -21,6 +21,10 @@ final class MarkdownTextView: NSTextView {
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         switch event.keyCode {
+        case 51 where modifiers.isEmpty:
+            if apply(MarkdownBlockEditing.headingBackspaceEdit(in: string, selectedRange: selectedRange())) {
+                return
+            }
         case 36 where modifiers.isEmpty,
              76 where modifiers.isEmpty:
             if apply(MarkdownListEditing.continuationEdit(in: string, selectedRange: selectedRange())) {
@@ -186,11 +190,17 @@ struct MarkdownEditorView: NSViewRepresentable {
                   let textView = notification.object as? MarkdownTextView else { return }
             isUpdatingFromTextView = true
             highlighter.highlight(textView.textStorage!)
+            updateTypingAttributes(for: textView)
             parent.text = textView.string
             isUpdatingFromTextView = false
             if let scrollView = textView.enclosingScrollView {
                 remeasure(in: scrollView)
             }
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? MarkdownTextView else { return }
+            updateTypingAttributes(for: textView)
         }
 
         func remeasure(in scrollView: NSScrollView) {
@@ -212,12 +222,27 @@ struct MarkdownEditorView: NSViewRepresentable {
             paragraph.minimumLineHeight = CurrentTheme.editorLineHeight
             paragraph.maximumLineHeight = CurrentTheme.editorLineHeight
             paragraph.lineBreakMode = .byWordWrapping
-            textView.typingAttributes = [
+
+            var attributes: [NSAttributedString.Key: Any] = [
                 .font: CurrentTheme.editorFont,
                 .foregroundColor: CurrentTheme.primaryTextColor,
                 .paragraphStyle: paragraph,
                 .baselineOffset: CurrentTheme.editorBaselineOffset
             ]
+
+            let selection = textView.selectedRange()
+            if selection.length == 0,
+               let heading = MarkdownBlockRendering.headingLine(in: textView.string, at: selection.location),
+               selection.location >= heading.contentRange.location {
+                paragraph.minimumLineHeight = CurrentTheme.editorHeadingLineHeight(level: heading.level)
+                paragraph.maximumLineHeight = CurrentTheme.editorHeadingLineHeight(level: heading.level)
+                paragraph.paragraphSpacingBefore = CurrentTheme.editorHeadingSpacingBefore(level: heading.level)
+                paragraph.paragraphSpacing = CurrentTheme.editorHeadingSpacingAfter(level: heading.level)
+                attributes[.font] = CurrentTheme.editorHeadingFont(level: heading.level)
+                attributes[.paragraphStyle] = paragraph
+            }
+
+            textView.typingAttributes = attributes
         }
     }
 }
