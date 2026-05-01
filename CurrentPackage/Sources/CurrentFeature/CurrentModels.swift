@@ -101,9 +101,19 @@ public enum DayFormatting {
         return formatter.string(from: date)
     }
 
-    public static func shortTitle(for date: Date) -> String {
+    public static func shortTitle(for date: Date, calendar: Calendar = .current) -> String {
         let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "EEE, MMM d"
+        return formatter.string(from: date)
+    }
+
+    public static func monthDayTitle(for date: Date, calendar: Calendar = .current) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "MMM d"
         return formatter.string(from: date)
     }
 }

@@ -16,6 +16,7 @@ enum CurrentTheme {
     static let accentColor = NSColor.currentHex(0x0075DE)
     static let accentSoftColor = NSColor.currentHex(0xF2F9FF)
     static let inlineCodeBackgroundColor = NSColor.currentBlack(alpha: 0.045)
+    static let dayDividerColor = NSColor.currentBlack(alpha: 0.055)
 
     static let pageBackground = Color(nsColor: pageBackgroundColor)
     static let appSurface = Color(nsColor: appSurfaceColor)
@@ -30,8 +31,24 @@ enum CurrentTheme {
     static let fieldBackgroundActive = Color(nsColor: fieldBackgroundActiveColor)
     static let accent = Color(nsColor: accentColor)
     static let accentSoft = Color(nsColor: accentSoftColor)
+    static let dayDivider = Color(nsColor: dayDividerColor)
 
     static let contentMaxWidth: CGFloat = 700
+    static let timelineHorizontalPadding: CGFloat = 56
+    static let timelineTopPadding: CGFloat = 118
+    static let timelineBottomPadding: CGFloat = 132
+    static let timelineTopFadeHeight: CGFloat = 132
+    static let timelineTopFadeSolidHeight: CGFloat = 58
+    static let timelineScrollbarFadeClearance: CGFloat = 28
+    static let historyPreloadDistance: CGFloat = 280
+    static let historyResetDistance: CGFloat = 32
+    static let scrollTargetAnchorY: CGFloat = 0.18
+    static let dayLabelRailWidth: CGFloat = 118
+    static let dayDividerSpacing: CGFloat = 12
+    static let dayDividerIntrinsicHeight: CGFloat = 14
+    static let daySectionVerticalPaddingCollapsed: CGFloat = 8
+    static let daySectionVerticalPaddingExpanded: CGFloat = 13
+    static let dayEditorTopPadding: CGFloat = 14
     static let editorFontSize: CGFloat = 13
     static let editorLineHeight: CGFloat = 22
     static let editorHorizontalInset: CGFloat = 0
@@ -51,7 +68,7 @@ enum CurrentTheme {
     static let iconButton = Font.system(size: 14, weight: .regular)
     static let tinyLabel = Font.system(size: 10, weight: .medium)
     static let metadata = Font.system(size: 10, weight: .regular)
-    static let dayLabel = Font.system(size: 11, weight: .semibold)
+    static let dayLabel = Font.system(size: 10.5, weight: .medium)
 }
 
 private extension NSColor {

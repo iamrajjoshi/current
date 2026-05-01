@@ -8,8 +8,16 @@ struct CurrentFeatureChecks {
         try bootstrapCreatesDailyStreamAndTodayFile()
         try loadOlderDaysAppendsPastBelowToday()
         try loadOlderDaysDoesNotCreateMissingDayFiles()
-        try loadOlderDaysStopsAtBlankHistoryLimit()
+        try loadOlderDaysKeepsGoingPastBlankHistoryRunway()
+        try loadOlderDaysKeepsRenderedHistoryBounded()
         try loadOlderDaysKeepsOlderActualFilesReachable()
+        try loadNewerWindowRestoresTrimmedTopHistory()
+        try loadNewerWindowReloadsCleanTrimmedDocuments()
+        try dirtyOffWindowDocumentsStayCachedAndSave()
+        try rowHeightCalculatorKeepsEmptyCollapsedRowsStable()
+        try rowHeightCalculatorExpandsActiveEmptyRows()
+        try rowHeightCalculatorUsesLargeMinimumForEmptyToday()
+        try rowHeightCalculatorGrowsForMultilineText()
         try markdownListEditingContinuesCommonLists()
         try await autosaveWritesOnlyTheEditedDay()
         try rolloverCreatesANewTodayAndKeepsHistoryVisible()
@@ -101,7 +109,7 @@ struct CurrentFeatureChecks {
     }
 
     @MainActor
-    static func loadOlderDaysStopsAtBlankHistoryLimit() throws {
+    static func loadOlderDaysKeepsGoingPastBlankHistoryRunway() throws {
         let root = try temporaryRoot()
         let calendar = fixedCalendar()
         let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
@@ -110,23 +118,58 @@ struct CurrentFeatureChecks {
             cache: DayCache(calendar: calendar),
             recentDayCount: 2,
             historyBatchSize: 5,
-            blankHistoryDayLimit: 7,
             now: now
         )
         controller.bootstrapIfNeeded(now: now)
 
         controller.loadOlderDays()
         controller.loadOlderDays()
+        controller.loadOlderDays()
+        controller.loadOlderDays()
 
         try check(
-            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
-            "Blank placeholder history should stop at the configured runway"
+            controller.days.last?.id == "2026-04-08",
+            "Blank placeholder history should keep extending instead of stopping at a runway"
         )
-        try check(controller.canLoadOlderDays == false, "History loader should disable itself after the blank runway")
+        try check(controller.canLoadOlderDays == true, "History loader should remain available for endless scrollback")
         try check(
             !FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-23.md").path),
-            "Blank runway days should stay in memory until edited"
+            "Blank history days should stay in memory until edited"
         )
+    }
+
+    @MainActor
+    static func loadOlderDaysKeepsRenderedHistoryBounded() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let controller = TimelineController(
+            store: StreamStore(libraryRoot: root, calendar: calendar),
+            cache: DayCache(calendar: calendar),
+            recentDayCount: 2,
+            historyBatchSize: 5,
+            historyWindowDayCount: 12,
+            now: now
+        )
+        controller.bootstrapIfNeeded(now: now)
+
+        controller.loadOlderDays()
+        controller.loadOlderDays()
+        controller.loadOlderDays()
+        controller.loadOlderDays()
+
+        try check(controller.days.count == 12, "Rendered history should stay bounded by the configured window")
+        try check(controller.days.first?.id == "2026-04-19", "Compaction should slide the window toward older dates")
+        try check(controller.days.last?.id == "2026-04-08", "Older scrollback should keep extending after compaction")
+        try check(controller.topSpacerHeight > 0, "Compacted newer days should be represented by a top spacer")
+        try check(controller.bottomSpacerHeight == 0, "Older-only scrolling should not create a bottom spacer")
+        try check(controller.canLoadOlderDays == true, "History loader should remain available after compaction")
+
+        controller.jumpToToday()
+
+        try check(controller.days.map(\.id) == ["2026-04-29", "2026-04-28"], "Jumping to today should restore the recent window")
+        try check(controller.topSpacerHeight == 0, "Jumping to today should reset the top spacer")
+        try check(controller.bottomSpacerHeight == 0, "Jumping to today should reset the bottom spacer")
     }
 
     @MainActor
@@ -142,19 +185,171 @@ struct CurrentFeatureChecks {
             store: store,
             cache: DayCache(calendar: calendar),
             recentDayCount: 2,
-            historyBatchSize: 5,
-            blankHistoryDayLimit: 4,
+            historyBatchSize: 10,
             now: now
         )
         controller.bootstrapIfNeeded(now: now)
 
         controller.loadOlderDays()
+        controller.loadOlderDays()
+        controller.loadOlderDays()
 
         try check(
-            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-01"],
-            "Actual older Markdown files should remain reachable after the blank runway"
+            controller.days.contains { $0.id == "2026-04-01" },
+            "Actual older Markdown files should remain reachable when their date enters the endless history"
         )
-        try check(controller.days.last?.text == "Imported old note", "Expected the older actual file to load")
+        try check(
+            controller.days.first { $0.id == "2026-04-01" }?.text == "Imported old note",
+            "Expected the older actual file to load"
+        )
+    }
+
+    @MainActor
+    static func loadNewerWindowRestoresTrimmedTopHistory() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let controller = TimelineController(
+            store: StreamStore(libraryRoot: root, calendar: calendar),
+            cache: DayCache(calendar: calendar),
+            recentDayCount: 2,
+            historyBatchSize: 5,
+            historyWindowDayCount: 12,
+            now: now
+        )
+        controller.bootstrapIfNeeded(now: now)
+
+        controller.loadOlderWindow()
+        controller.loadOlderWindow()
+        controller.loadOlderWindow()
+        controller.loadOlderWindow()
+        let topSpacerBefore = controller.topSpacerHeight
+
+        try check(controller.days.first?.id == "2026-04-19", "Expected newer days to be trimmed after older paging")
+        try check(topSpacerBefore > 0, "Expected top spacer before loading newer rows")
+
+        controller.loadNewerWindow()
+
+        try check(controller.days.first?.id == "2026-04-24", "Loading newer should restore the next newer batch above the window")
+        try check(controller.days.count == 12, "Newer paging should keep the retained row count bounded")
+        try check(controller.topSpacerHeight < topSpacerBefore, "Loading newer should consume top spacer height")
+        try check(controller.bottomSpacerHeight > 0, "Loading newer from a trimmed top should trim older rows into a bottom spacer")
+    }
+
+    @MainActor
+    static func loadNewerWindowReloadsCleanTrimmedDocuments() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let noteDate = calendar.addingDays(-1, to: now)
+        let store = StreamStore(libraryRoot: root, calendar: calendar)
+        let stream = try store.defaultStream()
+        try writeDay(noteDate, text: "Persisted recent note", stream: stream, store: store)
+        let controller = TimelineController(
+            store: store,
+            cache: DayCache(maxCleanDocuments: 4, calendar: calendar),
+            recentDayCount: 2,
+            historyBatchSize: 14,
+            historyWindowDayCount: 30,
+            now: now
+        )
+        controller.bootstrapIfNeeded(now: now)
+
+        for _ in 0..<16 {
+            controller.loadOlderWindow()
+        }
+
+        try check(!controller.days.contains { $0.id == "2026-04-28" }, "Recent note should be trimmed out of the visible window")
+        try check(controller.cache[noteDate] == nil, "Clean off-window note should be allowed to evict from cache")
+
+        for _ in 0..<20 where !controller.days.contains(where: { $0.id == "2026-04-28" }) {
+            controller.loadNewerWindow()
+        }
+
+        try check(
+            controller.days.first { $0.id == "2026-04-28" }?.text == "Persisted recent note",
+            "Reloading newer rows should restore clean trimmed document text from disk"
+        )
+    }
+
+    @MainActor
+    static func dirtyOffWindowDocumentsStayCachedAndSave() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let store = StreamStore(libraryRoot: root, calendar: calendar)
+        let controller = TimelineController(
+            store: store,
+            cache: DayCache(calendar: calendar),
+            recentDayCount: 2,
+            historyBatchSize: 5,
+            historyWindowDayCount: 6,
+            autosaveDelay: 10,
+            now: now
+        )
+        controller.bootstrapIfNeeded(now: now)
+        controller.updateText(for: now, text: "Pinned dirty note")
+
+        controller.loadOlderWindow()
+        controller.loadOlderWindow()
+
+        try check(!controller.days.contains { $0.id == "2026-04-29" }, "Today should be trimmed out of the visible window")
+        try check(controller.cache[now]?.isDirty == true, "Dirty off-window documents should remain cached")
+
+        controller.save(now)
+
+        let todayPath = root.appendingPathComponent("Streams/Daily/2026/04/2026-04-29.md")
+        let savedText = try String(contentsOf: todayPath, encoding: .utf8)
+        try check(savedText == "Pinned dirty note", "Dirty off-window document did not save correctly")
+        try check(controller.cache[now]?.isDirty == false, "Saved off-window document should be clean")
+    }
+
+    static func rowHeightCalculatorKeepsEmptyCollapsedRowsStable() throws {
+        let calendar = fixedCalendar()
+        let date = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 28)))
+        let document = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/empty.md"), text: "")
+
+        let height = TimelineRowHeightCalculator.height(for: document, isToday: false, width: 700)
+
+        try check(height == TimelineRowHeightCalculator.collapsedEmptyDayHeight, "Empty non-today rows should stay collapsed")
+    }
+
+    static func rowHeightCalculatorExpandsActiveEmptyRows() throws {
+        let calendar = fixedCalendar()
+        let date = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 28)))
+        let document = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/active-empty.md"), text: "")
+
+        let collapsedHeight = TimelineRowHeightCalculator.height(for: document, isToday: false, width: 700)
+        let activeHeight = TimelineRowHeightCalculator.height(for: document, isToday: false, isActive: true, width: 700)
+
+        try check(activeHeight > collapsedHeight, "Active empty rows should reserve editor height instead of overlapping following dates")
+    }
+
+    static func rowHeightCalculatorUsesLargeMinimumForEmptyToday() throws {
+        let calendar = fixedCalendar()
+        let date = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29)))
+        let document = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today.md"), text: "")
+
+        let height = TimelineRowHeightCalculator.height(for: document, isToday: true, width: 700)
+
+        try check(height >= 320, "Today empty row should reserve the large editor minimum")
+    }
+
+    static func rowHeightCalculatorGrowsForMultilineText() throws {
+        let calendar = fixedCalendar()
+        let date = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 28)))
+        let short = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/short.md"), text: "One line")
+        let multiline = DayDocument(
+            streamID: UUID(),
+            date: date,
+            fileURL: URL(fileURLWithPath: "/tmp/multiline.md"),
+            text: (0..<18).map { "Line \($0)" }.joined(separator: "\n")
+        )
+
+        let shortHeight = TimelineRowHeightCalculator.height(for: short, isToday: false, width: 700)
+        let multilineHeight = TimelineRowHeightCalculator.height(for: multiline, isToday: false, width: 700)
+
+        try check(multilineHeight > shortHeight, "Multiline note height should increase deterministically")
     }
 
     static func markdownListEditingContinuesCommonLists() throws {

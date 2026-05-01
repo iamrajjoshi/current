@@ -1,4 +1,5 @@
 import Combine
+import CoreGraphics
 import Foundation
 
 public struct TimelineNotice: Identifiable, Equatable {
@@ -14,15 +15,133 @@ public struct TimelineNotice: Identifiable, Equatable {
     public var message: String
 }
 
+public struct TimelineScrollRequest: Equatable, Identifiable {
+    public enum Target: Equatable {
+        case today(String)
+        case searchMatch(String)
+    }
+
+    public let id: UUID
+    public var target: Target
+
+    public var dayID: String {
+        switch target {
+        case .today(let dayID), .searchMatch(let dayID):
+            return dayID
+        }
+    }
+
+    public static func today(_ dayID: String) -> TimelineScrollRequest {
+        TimelineScrollRequest(id: UUID(), target: .today(dayID))
+    }
+
+    public static func searchMatch(_ dayID: String) -> TimelineScrollRequest {
+        TimelineScrollRequest(id: UUID(), target: .searchMatch(dayID))
+    }
+}
+
+public struct TimelineWindowState: Equatable {
+    public private(set) var dates: [Date] = []
+    public private(set) var topSpacerHeight: CGFloat = 0
+    public private(set) var bottomSpacerHeight: CGFloat = 0
+    public var retainedDayCount: Int
+    public var batchSize: Int
+
+    public init(
+        dates: [Date] = [],
+        topSpacerHeight: CGFloat = 0,
+        bottomSpacerHeight: CGFloat = 0,
+        retainedDayCount: Int = 180,
+        batchSize: Int = 14
+    ) {
+        self.dates = dates
+        self.topSpacerHeight = max(0, topSpacerHeight)
+        self.bottomSpacerHeight = max(0, bottomSpacerHeight)
+        self.retainedDayCount = max(1, retainedDayCount)
+        self.batchSize = max(1, batchSize)
+    }
+
+    mutating func reset(to dates: [Date]) {
+        self.dates = dates
+        topSpacerHeight = 0
+        bottomSpacerHeight = 0
+    }
+
+    mutating func clearTopSpacer() {
+        topSpacerHeight = 0
+    }
+
+    @discardableResult
+    mutating func appendOlderDates(
+        _ olderDates: [Date],
+        heightForDate: (Date) -> CGFloat
+    ) -> TimelineWindowMutation {
+        let uniqueDates = olderDates.filter { !dates.contains($0) }
+        guard !uniqueDates.isEmpty else {
+            return TimelineWindowMutation()
+        }
+
+        dates.append(contentsOf: uniqueDates)
+
+        let restoredHeight = uniqueDates.reduce(CGFloat(0)) { $0 + max(1, heightForDate($1)) }
+        if bottomSpacerHeight > 0 {
+            bottomSpacerHeight = max(0, bottomSpacerHeight - restoredHeight)
+        }
+
+        var trimmedDates: [Date] = []
+        if dates.count > retainedDayCount {
+            let overflow = dates.count - retainedDayCount
+            trimmedDates = Array(dates.prefix(overflow))
+            topSpacerHeight += trimmedDates.reduce(CGFloat(0)) { $0 + max(1, heightForDate($1)) }
+            dates.removeFirst(overflow)
+        }
+
+        return TimelineWindowMutation(addedDates: uniqueDates, trimmedDates: trimmedDates)
+    }
+
+    @discardableResult
+    mutating func prependNewerDates(
+        _ newerDates: [Date],
+        heightForDate: (Date) -> CGFloat
+    ) -> TimelineWindowMutation {
+        let uniqueDates = newerDates.filter { !dates.contains($0) }
+        guard !uniqueDates.isEmpty else {
+            return TimelineWindowMutation()
+        }
+
+        dates.insert(contentsOf: uniqueDates, at: 0)
+
+        let restoredHeight = uniqueDates.reduce(CGFloat(0)) { $0 + max(1, heightForDate($1)) }
+        topSpacerHeight = max(0, topSpacerHeight - restoredHeight)
+
+        var trimmedDates: [Date] = []
+        if dates.count > retainedDayCount {
+            let overflow = dates.count - retainedDayCount
+            trimmedDates = Array(dates.suffix(overflow))
+            bottomSpacerHeight += trimmedDates.reduce(CGFloat(0)) { $0 + max(1, heightForDate($1)) }
+            dates.removeLast(overflow)
+        }
+
+        return TimelineWindowMutation(addedDates: uniqueDates, trimmedDates: trimmedDates)
+    }
+}
+
+struct TimelineWindowMutation: Equatable {
+    var addedDates: [Date] = []
+    var trimmedDates: [Date] = []
+}
+
 @MainActor
 public final class TimelineController: ObservableObject {
     @Published public private(set) var stream: Stream?
     @Published public private(set) var days: [DayDocument] = []
     @Published public private(set) var today: Date
     @Published public private(set) var isBootstrapped = false
-    @Published public private(set) var scrollTargetID: String?
+    @Published public private(set) var scrollRequest: TimelineScrollRequest?
     @Published public private(set) var activeDate: Date?
     @Published public private(set) var canLoadOlderDays = true
+    @Published public private(set) var topSpacerHeight: CGFloat = 0
+    @Published public private(set) var bottomSpacerHeight: CGFloat = 0
     @Published public var searchQuery = ""
     @Published public var notice: TimelineNotice?
 
@@ -30,10 +149,11 @@ public final class TimelineController: ObservableObject {
     public var cache: DayCache
     public var recentDayCount: Int
     public var historyBatchSize: Int
-    public var blankHistoryDayLimit: Int
+    public var historyWindowDayCount: Int
+    public var estimatedCollapsedDayHeight: CGFloat
     public var autosaveDelay: TimeInterval
 
-    private var visibleDates: [Date] = []
+    private var windowState: TimelineWindowState
     private var pendingSaves: [Date: DispatchWorkItem] = [:]
     private let calendar: Calendar
 
@@ -41,8 +161,9 @@ public final class TimelineController: ObservableObject {
         store: StreamStore = StreamStore(),
         cache: DayCache = DayCache(),
         recentDayCount: Int = 7,
-        historyBatchSize: Int = 7,
-        blankHistoryDayLimit: Int = 45,
+        historyBatchSize: Int = 14,
+        historyWindowDayCount: Int = 180,
+        estimatedCollapsedDayHeight: CGFloat = TimelineRowHeightCalculator.collapsedEmptyDayHeight,
         autosaveDelay: TimeInterval = 0.55,
         now: Date = Date()
     ) {
@@ -50,10 +171,15 @@ public final class TimelineController: ObservableObject {
         self.cache = cache
         self.recentDayCount = recentDayCount
         self.historyBatchSize = historyBatchSize
-        self.blankHistoryDayLimit = blankHistoryDayLimit
+        self.historyWindowDayCount = historyWindowDayCount
+        self.estimatedCollapsedDayHeight = estimatedCollapsedDayHeight
         self.autosaveDelay = autosaveDelay
         self.calendar = store.calendar
         self.today = store.calendar.startOfDay(for: now)
+        self.windowState = TimelineWindowState(
+            retainedDayCount: historyWindowDayCount,
+            batchSize: historyBatchSize
+        )
     }
 
     public func bootstrapIfNeeded(now: Date = Date()) {
@@ -66,10 +192,6 @@ public final class TimelineController: ObservableObject {
             let stream = try store.defaultStream()
             self.stream = stream
             today = calendar.startOfDay(for: now)
-            visibleDates = (0..<recentDayCount)
-                .map { calendar.addingDays(-$0, to: today) }
-            canLoadOlderDays = true
-            try loadVisibleDates(createToday: true)
             isBootstrapped = true
             jumpToToday()
         } catch {
@@ -81,55 +203,49 @@ public final class TimelineController: ObservableObject {
         }
     }
 
-    public func loadOlderDays() {
-        guard let stream else { return }
-        guard let oldest = visibleDates.last else { return }
+    @discardableResult
+    public func loadOlderWindow() -> Bool {
+        syncWindowConfiguration()
+        guard let stream else { return false }
+        guard let oldest = windowState.dates.last else { return false }
 
-        let olderDates = nextOlderDates(before: oldest, in: stream)
-        guard !olderDates.isEmpty else {
-            canLoadOlderDays = false
-            return
+        let olderDates = nextOlderDates(before: oldest)
+        guard !olderDates.isEmpty else { return false }
+
+        loadDocuments(for: olderDates, in: stream, createToday: false)
+        windowState.appendOlderDates(olderDates) { [weak self] date in
+            self?.spacerHeight(for: date) ?? self?.estimatedCollapsedDayHeight ?? TimelineRowHeightCalculator.collapsedEmptyDayHeight
         }
-
-        for date in olderDates where !visibleDates.contains(date) {
-            visibleDates.append(date)
-            do {
-                cache.insert(try store.loadDay(date, in: stream))
-            } catch {
-                notice = TimelineNotice(
-                    kind: .saveError,
-                    title: "Could not load history",
-                    message: error.localizedDescription
-                )
-            }
-        }
-
-        canLoadOlderDays = olderDates.count == historyBatchSize
         publishDays()
+        canLoadOlderDays = true
+        return true
     }
 
-    private func nextOlderDates(before oldest: Date, in stream: Stream) -> [Date] {
-        guard historyBatchSize > 0 else { return [] }
+    @discardableResult
+    public func loadNewerWindow() -> Bool {
+        syncWindowConfiguration()
+        guard let stream else { return false }
+        guard topSpacerHeight > 0 || windowState.topSpacerHeight > 0 else { return false }
+        guard let newest = windowState.dates.first else { return false }
 
-        let blankFloor = calendar.addingDays(-(max(1, blankHistoryDayLimit) - 1), to: today)
-        var olderDates: [Date] = []
-        var cursor = calendar.addingDays(-1, to: oldest)
-
-        while olderDates.count < historyBatchSize, cursor >= blankFloor {
-            if !visibleDates.contains(cursor) {
-                olderDates.append(cursor)
-            }
-            cursor = calendar.addingDays(-1, to: cursor)
+        let newerDates = nextNewerDates(after: newest)
+        guard !newerDates.isEmpty else {
+            windowState.clearTopSpacer()
+            publishDays()
+            return false
         }
 
-        let remaining = historyBatchSize - olderDates.count
-        guard remaining > 0 else { return olderDates }
+        loadDocuments(for: newerDates, in: stream, createToday: true)
+        windowState.prependNewerDates(newerDates) { [weak self] date in
+            self?.spacerHeight(for: date) ?? self?.estimatedCollapsedDayHeight ?? TimelineRowHeightCalculator.collapsedEmptyDayHeight
+        }
+        publishDays()
+        return true
+    }
 
-        let actualFileCutoff = olderDates.last ?? oldest
-        let actualFileDates = store.existingDayDates(in: stream, before: actualFileCutoff, limit: remaining)
-            .filter { !visibleDates.contains($0) && !olderDates.contains($0) }
-        olderDates.append(contentsOf: actualFileDates)
-        return olderDates
+    @discardableResult
+    public func loadOlderDays(measuredHeightForDayID: (String) -> CGFloat? = { _ in nil }) -> Bool {
+        loadOlderWindow()
     }
 
     public func updateText(for date: Date, text: String) {
@@ -146,6 +262,10 @@ public final class TimelineController: ObservableObject {
 
     public var activeDocument: DayDocument? {
         cache[activeDate ?? today] ?? cache[today]
+    }
+
+    public var activeDayID: String? {
+        activeDate.map { DayFormatting.dayKey(for: $0, calendar: calendar) }
     }
 
     public func save(_ date: Date) {
@@ -210,49 +330,23 @@ public final class TimelineController: ObservableObject {
     }
 
     public func handleDayRollover(now: Date = Date()) {
-        guard let stream, isBootstrapped else { return }
+        guard stream != nil, isBootstrapped else { return }
         let newToday = calendar.startOfDay(for: now)
         guard newToday > today else { return }
-
-        var cursor = calendar.addingDays(1, to: today)
-        while cursor <= newToday {
-            if !visibleDates.contains(cursor) {
-                visibleDates.insert(cursor, at: 0)
-            }
-            do {
-                cache.insert(try store.loadDay(cursor, in: stream, createIfMissing: cursor == newToday))
-            } catch {
-                notice = TimelineNotice(
-                    kind: .saveError,
-                    title: "Could not create today",
-                    message: error.localizedDescription
-                )
-            }
-            cursor = calendar.addingDays(1, to: cursor)
-        }
-
         today = newToday
-        publishDays()
         jumpToToday()
     }
 
     public func jumpToToday() {
-        if !visibleDates.contains(today) {
-            visibleDates.insert(today, at: 0)
-            do {
-                if let stream {
-                    cache.insert(try store.loadDay(today, in: stream, createIfMissing: true))
-                }
-            } catch {
-                notice = TimelineNotice(
-                    kind: .saveError,
-                    title: "Could not load today",
-                    message: error.localizedDescription
-                )
-            }
-            publishDays()
+        syncWindowConfiguration()
+        windowState.reset(to: recentDates(endingAt: today))
+
+        if let stream {
+            loadDocuments(for: windowState.dates, in: stream, createToday: true)
         }
-        scrollTargetID = DayFormatting.dayKey(for: today, calendar: calendar)
+
+        publishDays()
+        scrollRequest = .today(DayFormatting.dayKey(for: today, calendar: calendar))
     }
 
     public func copyCurrentDayMarkdown() -> String {
@@ -282,21 +376,88 @@ public final class TimelineController: ObservableObject {
     }
 
     public func scrollToFirstSearchMatch() {
-        scrollTargetID = firstSearchMatchID()
+        guard let id = firstSearchMatchID() else { return }
+        scrollRequest = .searchMatch(id)
     }
 
-    private func loadVisibleDates(createToday: Bool) throws {
-        guard let stream else { return }
-        for date in visibleDates {
-            cache.insert(try store.loadDay(date, in: stream, createIfMissing: createToday && date == today))
+    private func loadDocuments(for dates: [Date], in stream: Stream, createToday: Bool) {
+        for date in dates {
+            do {
+                cache.insert(try store.loadDay(
+                    date,
+                    in: stream,
+                    createIfMissing: createToday && calendar.isDate(date, inSameDayAs: today)
+                ))
+            } catch {
+                notice = TimelineNotice(
+                    kind: .saveError,
+                    title: "Could not load history",
+                    message: error.localizedDescription
+                )
+            }
         }
-        publishDays()
+    }
+
+    private func nextOlderDates(before oldest: Date) -> [Date] {
+        syncWindowConfiguration()
+        var olderDates: [Date] = []
+        var cursor = calendar.addingDays(-1, to: oldest)
+
+        while olderDates.count < windowState.batchSize {
+            olderDates.append(cursor)
+            cursor = calendar.addingDays(-1, to: cursor)
+        }
+
+        return olderDates
+    }
+
+    private func nextNewerDates(after newest: Date) -> [Date] {
+        syncWindowConfiguration()
+        guard newest < today else { return [] }
+
+        var newerDatesAscending: [Date] = []
+        var cursor = calendar.addingDays(1, to: newest)
+
+        while cursor <= today, newerDatesAscending.count < windowState.batchSize {
+            newerDatesAscending.append(cursor)
+            cursor = calendar.addingDays(1, to: cursor)
+        }
+
+        return newerDatesAscending.reversed()
+    }
+
+    private func recentDates(endingAt newest: Date) -> [Date] {
+        let count = max(1, recentDayCount)
+        return (0..<count)
+            .map { calendar.addingDays(-$0, to: newest) }
+    }
+
+    private func spacerHeight(for date: Date) -> CGFloat {
+        guard let document = cache[date] else {
+            return estimatedCollapsedDayHeight
+        }
+        return TimelineRowHeightCalculator.height(
+            for: document,
+            isToday: calendar.isDate(document.date, inSameDayAs: today),
+            isActive: activeDate.map { calendar.isDate($0, inSameDayAs: document.date) } ?? false,
+            width: CurrentTheme.contentMaxWidth
+        )
+    }
+
+    private func syncWindowConfiguration() {
+        windowState.retainedDayCount = max(1, historyWindowDayCount)
+        windowState.batchSize = max(1, historyBatchSize)
     }
 
     private func publishDays() {
-        let visibleSet = Set(visibleDates)
+        syncWindowConfiguration()
+        topSpacerHeight = windowState.topSpacerHeight
+        bottomSpacerHeight = windowState.bottomSpacerHeight
+        canLoadOlderDays = true
+
+        let visibleSet = Set(windowState.dates)
         _ = cache.evictCleanDocuments(keeping: visibleSet, today: today)
-        days = visibleDates.compactMap { cache[$0] }
+        days = windowState.dates.compactMap { cache[$0] }
     }
 
     private func scheduleAutosave(for date: Date) {

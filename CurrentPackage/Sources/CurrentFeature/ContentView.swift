@@ -10,9 +10,13 @@ public struct ContentView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            timeline
-            bottomBar
+        ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                timeline
+                bottomBar
+            }
+
+            timelineTopFade
         }
         .frame(minWidth: 820, minHeight: 640)
         .background(CurrentTheme.pageBackground)
@@ -22,6 +26,9 @@ public struct ContentView: View {
         .onReceive(maintenanceTimer) { date in
             controller.handleDayRollover(now: date)
             controller.refreshExternalChanges()
+        }
+        .onChange(of: controller.searchQuery) { _, _ in
+            controller.scrollToFirstSearchMatch()
         }
         .alert(item: Binding(
             get: { controller.notice },
@@ -36,58 +43,58 @@ public struct ContentView: View {
     }
 
     private var timeline: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                HStack(alignment: .top, spacing: 0) {
-                    Spacer(minLength: 0)
-
-                    LazyVStack(spacing: 0) {
-                        ForEach(displayedDays) { document in
-                            DaySectionView(
-                                document: document,
-                                isToday: Calendar.current.isDate(document.date, inSameDayAs: controller.today),
-                                searchQuery: controller.searchQuery,
-                                onFocus: {
-                                    controller.setActiveDate(document.date)
-                                },
-                                onChange: { text in
-                                    controller.updateText(for: document.date, text: text)
-                                }
-                            )
-                            .id(document.id)
-                        }
-
-                        if controller.canLoadOlderDays {
-                            HistoryLoaderView(oldestDayID: displayedDays.last?.id) {
-                                controller.loadOlderDays()
-                            }
-                        }
-                    }
-                    .frame(maxWidth: CurrentTheme.contentMaxWidth, alignment: .leading)
-
-                    Spacer(minLength: 0)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.horizontal, 56)
-                .padding(.top, 44)
-                .padding(.bottom, 26)
+        TimelineCollectionView(
+            days: displayedDays,
+            today: controller.today,
+            activeDayID: controller.activeDayID,
+            searchQuery: controller.searchQuery,
+            topSpacerHeight: controller.topSpacerHeight,
+            bottomSpacerHeight: controller.bottomSpacerHeight,
+            scrollRequest: controller.scrollRequest,
+            onFocus: { date in
+                controller.setActiveDate(date)
+            },
+            onChange: { date, text in
+                controller.updateText(for: date, text: text)
+            },
+            onLoadOlder: {
+                controller.loadOlderWindow()
+            },
+            onLoadNewer: {
+                controller.loadNewerWindow()
             }
-            .background(CurrentTheme.pageBackground)
-            .coordinateSpace(name: "timelineScroll")
-            .onChange(of: controller.scrollTargetID) { _, id in
-                guard let id else { return }
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    proxy.scrollTo(id, anchor: .top)
-                }
+        )
+        .background(CurrentTheme.pageBackground)
+    }
+
+    private var timelineTopFade: some View {
+        HStack(spacing: 0) {
+            VStack(spacing: 0) {
+                CurrentTheme.pageBackground
+                    .frame(height: CurrentTheme.timelineTopFadeSolidHeight)
+
+                LinearGradient(
+                    colors: [
+                        CurrentTheme.pageBackground,
+                        CurrentTheme.pageBackground.opacity(0.98),
+                        CurrentTheme.pageBackground.opacity(0.82),
+                        CurrentTheme.pageBackground.opacity(0.38),
+                        CurrentTheme.pageBackground.opacity(0)
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
-            .onChange(of: controller.searchQuery) { _, _ in
-                if let id = controller.firstSearchMatchID() {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        proxy.scrollTo(id, anchor: .center)
-                    }
-                }
-            }
+            .frame(height: CurrentTheme.timelineTopFadeHeight)
+            .frame(maxWidth: .infinity)
+
+            Color.clear
+                .frame(width: CurrentTheme.timelineScrollbarFadeClearance)
         }
+        .frame(height: CurrentTheme.timelineTopFadeHeight)
+        .frame(maxWidth: .infinity)
+        .ignoresSafeArea(edges: .top)
+        .allowsHitTesting(false)
     }
 
     private var bottomBar: some View {
@@ -157,6 +164,7 @@ public struct ContentView: View {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
     }
+
 }
 
 private struct QuietChromeButtonStyle: ButtonStyle {
@@ -170,115 +178,38 @@ private struct QuietChromeButtonStyle: ButtonStyle {
     }
 }
 
-struct HistoryLoaderView: View {
-    var oldestDayID: String?
-    var load: () -> Void
-    @State private var lastRequestedOldestDayID: String?
-    @State private var currentOldestDayID: String?
-    @State private var currentMinY: CGFloat = .infinity
-    @State private var isArmed = true
-    @State private var autoFillTask: Task<Void, Never>?
-
-    private let triggerY: CGFloat = 760
-    private let resetY: CGFloat = 920
-
-    var body: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .preference(
-                    key: HistoryLoaderOffsetKey.self,
-                    value: proxy.frame(in: .named("timelineScroll")).minY
-                )
-        }
-        .frame(height: 120)
-        .onAppear {
-            currentOldestDayID = oldestDayID
-        }
-        .onDisappear {
-            autoFillTask?.cancel()
-            autoFillTask = nil
-        }
-        .onChange(of: oldestDayID) { _, newValue in
-            currentOldestDayID = newValue
-            if currentMinY < triggerY {
-                isArmed = true
-                loadIfNeeded()
-            }
-        }
-        .onPreferenceChange(HistoryLoaderOffsetKey.self) { minY in
-            currentMinY = minY
-
-            if minY > resetY {
-                isArmed = true
-                autoFillTask?.cancel()
-                autoFillTask = nil
-            }
-
-            if minY < triggerY {
-                loadIfNeeded()
-            }
-        }
-    }
-
-    private func loadIfNeeded() {
-        let targetOldestDayID = currentOldestDayID ?? oldestDayID
-        guard isArmed, let targetOldestDayID, targetOldestDayID != lastRequestedOldestDayID else { return }
-        isArmed = false
-        lastRequestedOldestDayID = targetOldestDayID
-        Task { @MainActor in
-            load()
-        }
-        scheduleAutoFillIfStillNearBottom()
-    }
-
-    private func scheduleAutoFillIfStillNearBottom() {
-        autoFillTask?.cancel()
-        autoFillTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 180_000_000)
-            guard !Task.isCancelled else { return }
-            if currentMinY < triggerY {
-                isArmed = true
-                loadIfNeeded()
-            }
-        }
-    }
-}
-
-private struct HistoryLoaderOffsetKey: PreferenceKey {
-    static let defaultValue: CGFloat = .infinity
-
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
-    }
-}
-
 struct DaySectionView: View {
     var document: DayDocument
     var isToday: Bool
+    var isActive: Bool
     var searchQuery: String
     var onFocus: () -> Void
     var onChange: (String) -> Void
 
     @State private var text: String
     @State private var editorHeight: CGFloat
-    @State private var isExpanded: Bool
 
     init(
         document: DayDocument,
         isToday: Bool,
+        isActive: Bool,
         searchQuery: String,
         onFocus: @escaping () -> Void,
         onChange: @escaping (String) -> Void
     ) {
         self.document = document
         self.isToday = isToday
+        self.isActive = isActive
         self.searchQuery = searchQuery
         self.onFocus = onFocus
         self.onChange = onChange
         let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         _text = State(initialValue: document.text)
-        _editorHeight = State(initialValue: isToday && !hasText ? 280 : 74)
-        _isExpanded = State(initialValue: isToday || hasText)
+        _editorHeight = State(
+            initialValue: isToday && !hasText
+                ? TimelineRowHeightCalculator.todayEmptyEditorMinimumHeight
+                : TimelineRowHeightCalculator.expandedEditorMinimumHeight
+        )
     }
 
     var body: some View {
@@ -287,25 +218,29 @@ struct DaySectionView: View {
 
             if isExpanded {
                 editorSurface
-                    .padding(.top, 14)
+                    .padding(.top, CurrentTheme.dayEditorTopPadding)
             }
         }
-        .padding(.vertical, isExpanded ? 13 : 6)
+        .padding(
+            .vertical,
+            isExpanded ? CurrentTheme.daySectionVerticalPaddingExpanded : CurrentTheme.daySectionVerticalPaddingCollapsed
+        )
         .padding(.horizontal, 0)
         .background(searchHit ? CurrentTheme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .onChange(of: text) { _, newText in
-            if !newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                isExpanded = true
-            }
+            guard newText != document.text else { return }
             onChange(newText)
         }
         .onChange(of: document.text) { _, newText in
             if newText != text {
                 text = newText
-                if !newText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    isExpanded = true
-                }
             }
+        }
+        .onChange(of: document.id) { _, _ in
+            syncDocumentState()
+        }
+        .onChange(of: isActive) { _, _ in
+            syncDocumentState()
         }
     }
 
@@ -314,7 +249,7 @@ struct DaySectionView: View {
             MarkdownEditorView(
                 text: $text,
                 measuredHeight: $editorHeight,
-                focusOnAppear: isToday,
+                focusOnAppear: isToday || isActive,
                 minimumHeight: minimumEditorHeight,
                 onFocus: onFocus
             )
@@ -332,22 +267,20 @@ struct DaySectionView: View {
 
     private var dayDivider: some View {
         Button {
-            if !isToday || !text.isEmpty {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isExpanded.toggle()
-                }
-            }
+            onFocus()
         } label: {
-            HStack(spacing: 8) {
+            HStack(spacing: CurrentTheme.dayDividerSpacing) {
                 Text(dayTitle)
                     .font(CurrentTheme.dayLabel)
-                    .tracking(0.7)
+                    .tracking(0.85)
                     .textCase(.uppercase)
-                    .foregroundStyle(isToday ? CurrentTheme.secondaryText : CurrentTheme.mutedText)
+                    .foregroundStyle(isToday ? CurrentTheme.secondaryText.opacity(0.82) : CurrentTheme.mutedText.opacity(0.94))
                     .lineLimit(1)
+                    .monospacedDigit()
+                    .frame(width: CurrentTheme.dayLabelRailWidth, alignment: .leading)
 
                 Rectangle()
-                    .fill(CurrentTheme.softDivider)
+                    .fill(CurrentTheme.dayDivider.opacity(isToday ? 1 : 0.78))
                     .frame(height: 1)
             }
             .contentShape(Rectangle())
@@ -360,9 +293,17 @@ struct DaySectionView: View {
         return 64
     }
 
+    private var hasText: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var isExpanded: Bool {
+        isToday || isActive || hasText
+    }
+
     private var dayTitle: String {
         if isToday {
-            return "Today · \(DayFormatting.shortTitle(for: document.date))"
+            return "Today, \(DayFormatting.monthDayTitle(for: document.date))"
         }
         return DayFormatting.shortTitle(for: document.date)
     }
@@ -370,6 +311,14 @@ struct DaySectionView: View {
     private var searchHit: Bool {
         let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         return !query.isEmpty && text.localizedStandardContains(query)
+    }
+
+    private func syncDocumentState() {
+        let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        text = document.text
+        editorHeight = isToday && !hasText
+            ? TimelineRowHeightCalculator.todayEmptyEditorMinimumHeight
+            : TimelineRowHeightCalculator.expandedEditorMinimumHeight
     }
 }
 
