@@ -99,10 +99,17 @@ public struct ContentView: View {
 
     private var bottomBar: some View {
         ZStack {
-            Text(activeStats)
-                .font(CurrentTheme.metadata)
-                .foregroundStyle(CurrentTheme.mutedText)
-                .monospacedDigit()
+            HStack(spacing: 7) {
+                Text(activeStats)
+                    .font(CurrentTheme.metadata)
+                    .foregroundStyle(CurrentTheme.mutedText)
+                    .monospacedDigit()
+
+                Circle()
+                    .fill(activeDocumentIsDirty ? CurrentTheme.accent.opacity(0.58) : CurrentTheme.mutedText.opacity(0.34))
+                    .frame(width: 5, height: 5)
+                    .help(activeDocumentIsDirty ? "Saving" : "Saved")
+            }
 
             HStack {
                 Spacer()
@@ -137,10 +144,23 @@ public struct ContentView: View {
     }
 
     private var activeStats: String {
-        let text = controller.activeDocument?.text ?? ""
+        let document = controller.activeDocument
+        let text = document?.text ?? ""
         let words = text.split { $0.isWhitespace }.count
         let characters = text.count
-        return "\(words) words · \(characters) characters"
+        return "\(activeDayTitle(for: document)) · \(words) words · \(characters) characters"
+    }
+
+    private var activeDocumentIsDirty: Bool {
+        controller.activeDocument?.isDirty == true
+    }
+
+    private func activeDayTitle(for document: DayDocument?) -> String {
+        guard let document else { return "Today" }
+        if Calendar.current.isDate(document.date, inSameDayAs: controller.today) {
+            return "Today"
+        }
+        return DayFormatting.shortTitle(for: document.date)
     }
 
     private var displayedDays: [DayDocument] {
@@ -169,12 +189,29 @@ public struct ContentView: View {
 
 private struct QuietChromeButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .foregroundStyle(configuration.isPressed ? CurrentTheme.primaryText : CurrentTheme.secondaryText)
-            .background(
-                configuration.isPressed ? CurrentTheme.fieldBackgroundActive : Color.clear,
-                in: RoundedRectangle(cornerRadius: 6)
-            )
+        QuietChromeButton(configuration: configuration)
+    }
+
+    private struct QuietChromeButton: View {
+        let configuration: ButtonStyle.Configuration
+        @State private var isHovered = false
+
+        var body: some View {
+            configuration.label
+                .foregroundStyle(configuration.isPressed ? CurrentTheme.primaryText : CurrentTheme.secondaryText)
+                .background(background, in: RoundedRectangle(cornerRadius: 6))
+                .onHover { isHovered = $0 }
+        }
+
+        private var background: Color {
+            if configuration.isPressed {
+                return CurrentTheme.fieldBackgroundActive
+            }
+            if isHovered {
+                return CurrentTheme.fieldBackground
+            }
+            return .clear
+        }
     }
 }
 
@@ -272,15 +309,15 @@ struct DaySectionView: View {
             HStack(spacing: CurrentTheme.dayDividerSpacing) {
                 Text(dayTitle)
                     .font(CurrentTheme.dayLabel)
-                    .tracking(0.85)
+                    .tracking(0.72)
                     .textCase(.uppercase)
-                    .foregroundStyle(isToday ? CurrentTheme.secondaryText.opacity(0.82) : CurrentTheme.mutedText.opacity(0.94))
+                    .foregroundStyle(dayLabelColor)
                     .lineLimit(1)
                     .monospacedDigit()
                     .frame(width: CurrentTheme.dayLabelRailWidth, alignment: .leading)
 
                 Rectangle()
-                    .fill(CurrentTheme.dayDivider.opacity(isToday ? 1 : 0.78))
+                    .fill(dayDividerColor)
                     .frame(height: 1)
             }
             .contentShape(Rectangle())
@@ -303,9 +340,23 @@ struct DaySectionView: View {
 
     private var dayTitle: String {
         if isToday {
-            return "Today, \(DayFormatting.monthDayTitle(for: document.date))"
+            return "Today · \(DayFormatting.shortTitle(for: document.date))"
         }
         return DayFormatting.shortTitle(for: document.date)
+    }
+
+    private var dayLabelColor: Color {
+        if isToday || isActive {
+            return CurrentTheme.secondaryText.opacity(0.86)
+        }
+        return CurrentTheme.mutedText.opacity(0.94)
+    }
+
+    private var dayDividerColor: Color {
+        if isToday || isActive {
+            return CurrentTheme.dayDivider.opacity(1)
+        }
+        return CurrentTheme.dayDivider.opacity(0.78)
     }
 
     private var searchHit: Bool {

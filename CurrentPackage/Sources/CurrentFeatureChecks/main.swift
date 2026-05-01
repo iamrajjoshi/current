@@ -18,6 +18,7 @@ struct CurrentFeatureChecks {
         try rowHeightCalculatorExpandsActiveEmptyRows()
         try rowHeightCalculatorUsesLargeMinimumForEmptyToday()
         try rowHeightCalculatorGrowsForMultilineText()
+        try timelineLayoutMetricsCenterTheWritingColumn()
         try markdownListEditingContinuesCommonLists()
         try await autosaveWritesOnlyTheEditedDay()
         try rolloverCreatesANewTodayAndKeepsHistoryVisible()
@@ -350,6 +351,29 @@ struct CurrentFeatureChecks {
         let multilineHeight = TimelineRowHeightCalculator.height(for: multiline, isToday: false, width: 700)
 
         try check(multilineHeight > shortHeight, "Multiline note height should increase deterministically")
+    }
+
+    static func timelineLayoutMetricsCenterTheWritingColumn() throws {
+        try check(
+            TimelineLayoutMetrics.itemWidth(availableWidth: 700) == 588,
+            "Compact widths should keep fixed horizontal padding"
+        )
+        try check(
+            TimelineLayoutMetrics.horizontalInset(availableWidth: 700) == 56,
+            "Compact widths should preserve the minimum horizontal inset"
+        )
+        try check(
+            TimelineLayoutMetrics.itemWidth(availableWidth: 820) == 700,
+            "Minimum app width should allow the max writing column"
+        )
+        try check(
+            TimelineLayoutMetrics.horizontalInset(availableWidth: 820) == 60,
+            "Minimum app width should center the max writing column"
+        )
+        try check(
+            TimelineLayoutMetrics.horizontalInset(availableWidth: 1200) == 250,
+            "Wide widths should recenter the max writing column"
+        )
     }
 
     static func markdownListEditingContinuesCommonLists() throws {

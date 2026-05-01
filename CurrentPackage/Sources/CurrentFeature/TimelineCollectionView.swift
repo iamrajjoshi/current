@@ -149,6 +149,23 @@ public enum TimelineRowHeightCalculator {
     }
 }
 
+public enum TimelineLayoutMetrics {
+    public static func itemWidth(availableWidth: CGFloat) -> CGFloat {
+        min(
+            CurrentTheme.contentMaxWidth,
+            max(1, availableWidth - CurrentTheme.timelineHorizontalPadding * 2)
+        )
+    }
+
+    public static func horizontalInset(availableWidth: CGFloat) -> CGFloat {
+        let width = itemWidth(availableWidth: max(1, availableWidth))
+        return max(
+            CurrentTheme.timelineHorizontalPadding,
+            floor((max(1, availableWidth) - width) / 2)
+        )
+    }
+}
+
 private enum TimelineCollectionItem: Equatable {
     case topSpacer(CGFloat)
     case day(DayDocument)
@@ -185,6 +202,7 @@ extension TimelineCollectionView {
         private var isLoadingNewer = false
         private var lastRequestedOlderBoundaryID: String?
         private var lastRequestedNewerBoundaryID: String?
+        private var lastViewportWidth: CGFloat = 0
 
         init(_ parent: TimelineCollectionView) {
             self.parent = parent
@@ -310,11 +328,8 @@ extension TimelineCollectionView {
             layout collectionViewLayout: NSCollectionViewLayout,
             insetForSectionAt section: Int
         ) -> NSEdgeInsets {
-            let availableWidth = max(1, collectionView.enclosingScrollView?.contentView.bounds.width ?? collectionView.bounds.width)
-            let width = itemWidth(in: collectionView)
-            let horizontalInset = max(
-                CurrentTheme.timelineHorizontalPadding,
-                floor((availableWidth - width) / 2)
+            let horizontalInset = TimelineLayoutMetrics.horizontalInset(
+                availableWidth: viewportWidth(in: collectionView)
             )
             return NSEdgeInsets(
                 top: CurrentTheme.timelineTopPadding,
@@ -333,8 +348,34 @@ extension TimelineCollectionView {
         }
 
         @objc private func boundsDidChange(_ notification: Notification) {
+            let widthChanged = recordViewportWidthChange()
+            let anchor = widthChanged ? captureFirstVisibleDayAnchor() : nil
             syncCollectionViewFrame()
+            if widthChanged {
+                collectionView?.collectionViewLayout?.invalidateLayout()
+                collectionView?.layoutSubtreeIfNeeded()
+                syncCollectionViewFrame()
+                reconfigureVisibleDayItems()
+                if let anchor {
+                    restore(anchor)
+                }
+            }
             maybeLoadMore()
+        }
+
+        private func recordViewportWidthChange() -> Bool {
+            let width = viewportWidth()
+            guard lastViewportWidth > 0 else {
+                lastViewportWidth = width
+                return false
+            }
+
+            guard abs(width - lastViewportWidth) > 0.5 else {
+                return false
+            }
+
+            lastViewportWidth = width
+            return true
         }
 
         private func syncCollectionViewFrame() {
@@ -342,6 +383,9 @@ extension TimelineCollectionView {
                   let collectionView else { return }
             let clipSize = scrollView.contentView.bounds.size
             let contentSize = collectionView.collectionViewLayout?.collectionViewContentSize ?? clipSize
+            if lastViewportWidth == 0 {
+                lastViewportWidth = max(1, clipSize.width)
+            }
             collectionView.frame = NSRect(
                 x: 0,
                 y: 0,
@@ -476,11 +520,18 @@ extension TimelineCollectionView {
         }
 
         private func itemWidth(in collectionView: NSCollectionView) -> CGFloat {
-            let availableWidth = max(1, collectionView.enclosingScrollView?.contentView.bounds.width ?? collectionView.bounds.width)
-            return min(
-                CurrentTheme.contentMaxWidth,
-                max(1, availableWidth - CurrentTheme.timelineHorizontalPadding * 2)
-            )
+            TimelineLayoutMetrics.itemWidth(availableWidth: viewportWidth(in: collectionView))
+        }
+
+        private func viewportWidth(in collectionView: NSCollectionView) -> CGFloat {
+            max(1, collectionView.enclosingScrollView?.contentView.bounds.width ?? collectionView.bounds.width)
+        }
+
+        private func viewportWidth() -> CGFloat {
+            if let collectionView {
+                return viewportWidth(in: collectionView)
+            }
+            return max(1, scrollView?.contentView.bounds.width ?? 1)
         }
 
         private static func items(from parent: TimelineCollectionView) -> [TimelineCollectionItem] {
