@@ -18,6 +18,12 @@ CURRENT_PROJECT_VERSION = 1
 MACOSX_DEPLOYMENT_TARGET = 14.0
 
 // ==========================================
+// Header Maps
+// ==========================================
+ALWAYS_SEARCH_USER_PATHS = NO
+ALWAYS_USE_SEPARATE_HEADERMAPS = YES
+
+// ==========================================
 // Info PLIST
 // ==========================================
 GENERATE_INFOPLIST_FILE = YES
