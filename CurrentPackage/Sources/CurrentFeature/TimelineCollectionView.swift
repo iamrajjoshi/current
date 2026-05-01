@@ -28,17 +28,13 @@ struct TimelineCollectionView: NSViewRepresentable {
         scrollView.scrollerStyle = .overlay
         scrollView.borderType = .noBorder
         scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollView.contentView.postsFrameChangedNotifications = true
 
         let layout = NSCollectionViewFlowLayout()
         layout.scrollDirection = .vertical
         layout.minimumLineSpacing = 0
-        layout.minimumInteritemSpacing = 0
-        layout.sectionInset = NSEdgeInsets(
-            top: CurrentTheme.timelineTopPadding,
-            left: CurrentTheme.timelineHorizontalPadding,
-            bottom: CurrentTheme.timelineBottomPadding,
-            right: CurrentTheme.timelineHorizontalPadding
-        )
+        layout.minimumInteritemSpacing = TimelineLayoutMetrics.minimumInteritemSpacing(availableWidth: 1)
+        layout.sectionInset = TimelineLayoutMetrics.sectionInset(availableWidth: 1)
 
         let collectionView = NSCollectionView()
         collectionView.collectionViewLayout = layout
@@ -164,6 +160,20 @@ public enum TimelineLayoutMetrics {
             floor((max(1, availableWidth) - width) / 2)
         )
     }
+
+    public static func sectionInset(availableWidth: CGFloat) -> NSEdgeInsets {
+        let horizontalInset = horizontalInset(availableWidth: availableWidth)
+        return NSEdgeInsets(
+            top: CurrentTheme.timelineTopPadding,
+            left: horizontalInset,
+            bottom: CurrentTheme.timelineBottomPadding,
+            right: horizontalInset
+        )
+    }
+
+    public static func minimumInteritemSpacing(availableWidth: CGFloat) -> CGFloat {
+        max(1, availableWidth)
+    }
 }
 
 private enum TimelineCollectionItem: Equatable {
@@ -214,8 +224,14 @@ extension TimelineCollectionView {
             guard let clipView = scrollView?.contentView else { return }
             NotificationCenter.default.addObserver(
                 self,
-                selector: #selector(boundsDidChange(_:)),
+                selector: #selector(viewportDidChange(_:)),
                 name: NSView.boundsDidChangeNotification,
+                object: clipView
+            )
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(viewportDidChange(_:)),
+                name: NSView.frameDidChangeNotification,
                 object: clipView
             )
         }
@@ -328,15 +344,7 @@ extension TimelineCollectionView {
             layout collectionViewLayout: NSCollectionViewLayout,
             insetForSectionAt section: Int
         ) -> NSEdgeInsets {
-            let horizontalInset = TimelineLayoutMetrics.horizontalInset(
-                availableWidth: viewportWidth(in: collectionView)
-            )
-            return NSEdgeInsets(
-                top: CurrentTheme.timelineTopPadding,
-                left: horizontalInset,
-                bottom: CurrentTheme.timelineBottomPadding,
-                right: horizontalInset
-            )
+            TimelineLayoutMetrics.sectionInset(availableWidth: viewportWidth(in: collectionView))
         }
 
         func collectionView(
@@ -347,7 +355,15 @@ extension TimelineCollectionView {
             0
         }
 
-        @objc private func boundsDidChange(_ notification: Notification) {
+        func collectionView(
+            _ collectionView: NSCollectionView,
+            layout collectionViewLayout: NSCollectionViewLayout,
+            minimumInteritemSpacingForSectionAt section: Int
+        ) -> CGFloat {
+            TimelineLayoutMetrics.minimumInteritemSpacing(availableWidth: viewportWidth(in: collectionView))
+        }
+
+        @objc private func viewportDidChange(_ notification: Notification) {
             let widthChanged = recordViewportWidthChange()
             let anchor = widthChanged ? captureFirstVisibleDayAnchor() : nil
             syncCollectionViewFrame()
@@ -382,6 +398,7 @@ extension TimelineCollectionView {
             guard let scrollView,
                   let collectionView else { return }
             let clipSize = scrollView.contentView.bounds.size
+            updateFlowLayoutForViewportWidth(clipSize.width)
             let contentSize = collectionView.collectionViewLayout?.collectionViewContentSize ?? clipSize
             if lastViewportWidth == 0 {
                 lastViewportWidth = max(1, clipSize.width)
@@ -392,6 +409,21 @@ extension TimelineCollectionView {
                 width: max(1, clipSize.width),
                 height: max(1, clipSize.height, contentSize.height)
             )
+        }
+
+        private func updateFlowLayoutForViewportWidth(_ width: CGFloat) {
+            guard let layout = collectionView?.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
+            let targetInset = TimelineLayoutMetrics.sectionInset(availableWidth: width)
+            let targetInteritemSpacing = TimelineLayoutMetrics.minimumInteritemSpacing(availableWidth: width)
+            let insetChanged = abs(layout.sectionInset.left - targetInset.left) > 0.5
+                || abs(layout.sectionInset.right - targetInset.right) > 0.5
+            let spacingChanged = abs(layout.minimumInteritemSpacing - targetInteritemSpacing) > 0.5
+
+            guard insetChanged || spacingChanged else { return }
+
+            layout.sectionInset = targetInset
+            layout.minimumInteritemSpacing = targetInteritemSpacing
+            layout.invalidateLayout()
         }
 
         private func maybeLoadMore() {

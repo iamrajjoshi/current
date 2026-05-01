@@ -19,6 +19,7 @@ struct CurrentFeatureChecks {
         try rowHeightCalculatorUsesLargeMinimumForEmptyToday()
         try rowHeightCalculatorGrowsForMultilineText()
         try timelineLayoutMetricsCenterTheWritingColumn()
+        try timelineLayoutMetricsPreventWideViewportWrapping()
         try markdownListEditingContinuesCommonLists()
         try markdownHeadingRenderingTracksNotionLikeShortcuts()
         try markdownHeadingBackspaceExitsBlock()
@@ -376,6 +377,22 @@ struct CurrentFeatureChecks {
             TimelineLayoutMetrics.horizontalInset(availableWidth: 1200) == 250,
             "Wide widths should recenter the max writing column"
         )
+    }
+
+    static func timelineLayoutMetricsPreventWideViewportWrapping() throws {
+        for availableWidth in [820, 1200, 2048, 3440].map(CGFloat.init) {
+            let itemWidth = TimelineLayoutMetrics.itemWidth(availableWidth: availableWidth)
+            let horizontalInset = TimelineLayoutMetrics.horizontalInset(availableWidth: availableWidth)
+            let interitemSpacing = TimelineLayoutMetrics.minimumInteritemSpacing(availableWidth: availableWidth)
+            try check(
+                itemWidth + horizontalInset * 2 <= availableWidth + 0.5,
+                "Single writing column should fit within the viewport at \(availableWidth)"
+            )
+            try check(
+                itemWidth * 2 + horizontalInset * 2 + interitemSpacing > availableWidth,
+                "Wide timeline rows should not have room to wrap into multiple columns at \(availableWidth)"
+            )
+        }
     }
 
     static func markdownListEditingContinuesCommonLists() throws {
