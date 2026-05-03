@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install XcodeBuildMCP
+        run: npm install --global xcodebuildmcp@2.3.2
+
+      - name: Run Swift package tests
+        run: xcodebuildmcp swift-package test --package-path CurrentPackage
+
+      - name: Run feature checks
+        run: xcodebuildmcp swift-package run --package-path CurrentPackage --executable-name CurrentFeatureChecks
+
+      - name: Build macOS app
+        run: xcodebuildmcp macos build --workspace-path Current.xcworkspace --scheme Current
+
+      - name: Run macOS tests
+        run: xcodebuildmcp macos test --workspace-path Current.xcworkspace --scheme Current
