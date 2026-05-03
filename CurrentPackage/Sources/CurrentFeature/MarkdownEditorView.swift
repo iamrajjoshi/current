@@ -70,6 +70,7 @@ final class MarkdownTextView: NSTextView {
 struct MarkdownEditorView: NSViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
+    var configuration: CurrentConfiguration = .default
     var focusOnAppear: Bool
     var minimumHeight: CGFloat = 72
     var onFocus: () -> Void = {}
@@ -140,6 +141,7 @@ struct MarkdownEditorView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.highlighter.update(configuration: configuration)
         guard let textView = scrollView.documentView as? MarkdownTextView else { return }
         scrollView.appearance = NSAppearance(named: .aqua)
         textView.appearance = NSAppearance(named: .aqua)
@@ -150,6 +152,7 @@ struct MarkdownEditorView: NSViewRepresentable {
             context.coordinator.parent.onFocus()
         }
         context.coordinator.updateTypingAttributes(for: textView)
+        context.coordinator.highlighter.highlight(textView.textStorage!)
 
         if !context.coordinator.isUpdatingFromTextView, textView.string != text {
             context.coordinator.isUpdatingFromSwiftUI = true
@@ -168,7 +171,7 @@ struct MarkdownEditorView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownEditorView
-        let highlighter = MarkdownSyntaxHighlighter()
+        let highlighter: MarkdownSyntaxHighlighter
         weak var textView: MarkdownTextView?
         var isUpdatingFromSwiftUI = false
         var isUpdatingFromTextView = false
@@ -176,6 +179,7 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         init(_ parent: MarkdownEditorView) {
             self.parent = parent
+            self.highlighter = MarkdownSyntaxHighlighter(configuration: parent.configuration)
         }
 
         func textDidBeginEditing(_ notification: Notification) {
@@ -219,12 +223,12 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         func updateTypingAttributes(for textView: NSTextView) {
             let paragraph = NSMutableParagraphStyle()
-            paragraph.minimumLineHeight = CurrentTheme.editorLineHeight
-            paragraph.maximumLineHeight = CurrentTheme.editorLineHeight
+            paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: parent.configuration)
+            paragraph.maximumLineHeight = CurrentTheme.editorLineHeight(configuration: parent.configuration)
             paragraph.lineBreakMode = .byWordWrapping
 
             var attributes: [NSAttributedString.Key: Any] = [
-                .font: CurrentTheme.editorFont,
+                .font: CurrentTheme.editorFont(configuration: parent.configuration),
                 .foregroundColor: CurrentTheme.primaryTextColor,
                 .paragraphStyle: paragraph,
                 .baselineOffset: CurrentTheme.editorBaselineOffset
@@ -234,11 +238,11 @@ struct MarkdownEditorView: NSViewRepresentable {
             if selection.length == 0,
                let heading = MarkdownBlockRendering.headingLine(in: textView.string, at: selection.location),
                selection.location >= heading.contentRange.location {
-                paragraph.minimumLineHeight = CurrentTheme.editorHeadingLineHeight(level: heading.level)
-                paragraph.maximumLineHeight = CurrentTheme.editorHeadingLineHeight(level: heading.level)
+                paragraph.minimumLineHeight = CurrentTheme.editorHeadingLineHeight(level: heading.level, configuration: parent.configuration)
+                paragraph.maximumLineHeight = CurrentTheme.editorHeadingLineHeight(level: heading.level, configuration: parent.configuration)
                 paragraph.paragraphSpacingBefore = CurrentTheme.editorHeadingSpacingBefore(level: heading.level)
                 paragraph.paragraphSpacing = CurrentTheme.editorHeadingSpacingAfter(level: heading.level)
-                attributes[.font] = CurrentTheme.editorHeadingFont(level: heading.level)
+                attributes[.font] = CurrentTheme.editorHeadingFont(level: heading.level, configuration: parent.configuration)
                 attributes[.paragraphStyle] = paragraph
             }
 

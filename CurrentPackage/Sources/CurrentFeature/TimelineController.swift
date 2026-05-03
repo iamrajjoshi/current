@@ -156,6 +156,7 @@ public final class TimelineController: ObservableObject {
     private var windowState: TimelineWindowState
     private var pendingSaves: [Date: DispatchWorkItem] = [:]
     private let calendar: Calendar
+    private var configuration: CurrentConfiguration = .default
 
     public init(
         store: StreamStore = StreamStore(),
@@ -200,6 +201,18 @@ public final class TimelineController: ObservableObject {
                 title: "Current could not open Daily",
                 message: error.localizedDescription
             )
+        }
+    }
+
+    public func apply(configuration: CurrentConfiguration) {
+        self.configuration = configuration
+        recentDayCount = max(1, configuration.recentDays)
+        historyBatchSize = max(1, configuration.historyBatchDays)
+        historyWindowDayCount = max(1, configuration.historyWindowDays)
+        autosaveDelay = max(0, configuration.autosaveDelay)
+        syncWindowConfiguration()
+        if isBootstrapped {
+            publishDays()
         }
     }
 
@@ -440,7 +453,8 @@ public final class TimelineController: ObservableObject {
             for: document,
             isToday: calendar.isDate(document.date, inSameDayAs: today),
             isActive: activeDate.map { calendar.isDate($0, inSameDayAs: document.date) } ?? false,
-            width: CurrentTheme.contentMaxWidth
+            width: CurrentTheme.contentMaxWidth(configuration: configuration),
+            configuration: configuration
         )
     }
 

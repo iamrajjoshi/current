@@ -1,8 +1,23 @@
 import AppKit
 
 final class MarkdownSyntaxHighlighter {
-    private let baseFont = CurrentTheme.editorFont
-    private let codeFont = CurrentTheme.editorFont
+    private var configuration: CurrentConfiguration
+
+    init(configuration: CurrentConfiguration = .default) {
+        self.configuration = configuration
+    }
+
+    func update(configuration: CurrentConfiguration) {
+        self.configuration = configuration
+    }
+
+    private var baseFont: NSFont {
+        CurrentTheme.editorFont(configuration: configuration)
+    }
+
+    private var codeFont: NSFont {
+        CurrentTheme.editorFont(configuration: configuration)
+    }
 
     func highlight(_ textStorage: NSTextStorage) {
         let fullRange = NSRange(location: 0, length: textStorage.length)
@@ -101,8 +116,8 @@ final class MarkdownSyntaxHighlighter {
 
     private func baseAttributes() -> [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = CurrentTheme.editorLineHeight
-        paragraph.maximumLineHeight = CurrentTheme.editorLineHeight
+        paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
+        paragraph.maximumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
         paragraph.lineBreakMode = .byWordWrapping
 
         return [
@@ -115,8 +130,8 @@ final class MarkdownSyntaxHighlighter {
 
     private func listParagraphStyle(prefix: String) -> NSMutableParagraphStyle {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = CurrentTheme.editorLineHeight
-        paragraph.maximumLineHeight = CurrentTheme.editorLineHeight
+        paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
+        paragraph.maximumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
         paragraph.lineBreakMode = .byWordWrapping
         paragraph.headIndent = ceil((prefix as NSString).size(withAttributes: [.font: baseFont]).width)
         paragraph.firstLineHeadIndent = 0
@@ -125,8 +140,8 @@ final class MarkdownSyntaxHighlighter {
 
     private func headingParagraphStyle(level: Int) -> NSMutableParagraphStyle {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = CurrentTheme.editorHeadingLineHeight(level: level)
-        paragraph.maximumLineHeight = CurrentTheme.editorHeadingLineHeight(level: level)
+        paragraph.minimumLineHeight = CurrentTheme.editorHeadingLineHeight(level: level, configuration: configuration)
+        paragraph.maximumLineHeight = CurrentTheme.editorHeadingLineHeight(level: level, configuration: configuration)
         paragraph.lineBreakMode = .byWordWrapping
         paragraph.paragraphSpacingBefore = CurrentTheme.editorHeadingSpacingBefore(level: level)
         paragraph.paragraphSpacing = CurrentTheme.editorHeadingSpacingAfter(level: level)
@@ -197,7 +212,7 @@ final class MarkdownSyntaxHighlighter {
     private func applyHeadingLines(to textStorage: NSTextStorage, protectedRanges: [NSRange]) {
         for heading in MarkdownBlockRendering.headingLines(in: textStorage.string) {
             guard !intersectsProtected(heading.lineRange, protectedRanges: protectedRanges) else { continue }
-            let headingFont = CurrentTheme.editorHeadingFont(level: heading.level)
+            let headingFont = CurrentTheme.editorHeadingFont(level: heading.level, configuration: configuration)
 
             textStorage.addAttribute(.paragraphStyle, value: headingParagraphStyle(level: heading.level), range: heading.lineRange)
             textStorage.addAttributes([

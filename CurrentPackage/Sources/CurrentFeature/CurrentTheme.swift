@@ -33,7 +33,7 @@ enum CurrentTheme {
     static let accentSoft = Color(nsColor: accentSoftColor)
     static let dayDivider = Color(nsColor: dayDividerColor)
 
-    static let contentMaxWidth: CGFloat = 700
+    static let contentMaxWidth: CGFloat = CGFloat(CurrentConfiguration.default.contentWidth)
     static let timelineHorizontalPadding: CGFloat = 56
     static let timelineTopPadding: CGFloat = 118
     static let timelineBottomPadding: CGFloat = 132
@@ -49,32 +49,72 @@ enum CurrentTheme {
     static let daySectionVerticalPaddingCollapsed: CGFloat = 8
     static let daySectionVerticalPaddingExpanded: CGFloat = 13
     static let dayEditorTopPadding: CGFloat = 14
-    static let editorFontSize: CGFloat = 13
-    static let editorLineHeight: CGFloat = 22
+    static let editorFontSize: CGFloat = CGFloat(CurrentConfiguration.default.fontSize)
+    static let editorLineHeight: CGFloat = CGFloat(CurrentConfiguration.default.lineHeight)
     static let editorHorizontalInset: CGFloat = 0
     static let editorVerticalInset: CGFloat = 8
     static var editorFont: NSFont {
-        NSFont.monospacedSystemFont(ofSize: editorFontSize, weight: .regular)
+        editorFont(configuration: .default)
     }
     static var editorBoldFont: NSFont {
-        NSFont.monospacedSystemFont(ofSize: editorFontSize, weight: .semibold)
+        editorBoldFont(configuration: .default)
     }
     static var editorHeadingFont: NSFont {
         editorHeadingFont(level: 3)
     }
+    static func contentMaxWidth(configuration: CurrentConfiguration) -> CGFloat {
+        CGFloat(configuration.contentWidth)
+    }
+    static func editorFontSize(configuration: CurrentConfiguration) -> CGFloat {
+        CGFloat(configuration.fontSize)
+    }
+    static func editorLineHeight(configuration: CurrentConfiguration) -> CGFloat {
+        CGFloat(configuration.lineHeight)
+    }
+    static func editorSwiftUIFont(configuration: CurrentConfiguration) -> Font {
+        if let fontFamily = configuration.fontFamily {
+            return .custom(fontFamily, size: editorFontSize(configuration: configuration))
+        }
+        return .system(size: editorFontSize(configuration: configuration), design: .monospaced)
+    }
+    static func editorFont(configuration: CurrentConfiguration) -> NSFont {
+        configuredFont(
+            family: configuration.fontFamily,
+            size: editorFontSize(configuration: configuration),
+            weight: .regular
+        )
+    }
+    static func editorBoldFont(configuration: CurrentConfiguration) -> NSFont {
+        configuredFont(
+            family: configuration.fontFamily,
+            size: editorFontSize(configuration: configuration),
+            weight: .semibold
+        )
+    }
     static func editorHeadingFont(level: Int) -> NSFont {
-        NSFont.monospacedSystemFont(ofSize: editorHeadingFontSize(level: level), weight: .semibold)
+        editorHeadingFont(level: level, configuration: .default)
+    }
+    static func editorHeadingFont(level: Int, configuration: CurrentConfiguration) -> NSFont {
+        configuredFont(
+            family: configuration.fontFamily,
+            size: editorHeadingFontSize(level: level, configuration: configuration),
+            weight: .semibold
+        )
     }
     static func editorHeadingLineHeight(level: Int) -> CGFloat {
+        editorHeadingLineHeight(level: level, configuration: .default)
+    }
+    static func editorHeadingLineHeight(level: Int, configuration: CurrentConfiguration) -> CGFloat {
+        let lineHeight = editorLineHeight(configuration: configuration)
         switch level {
         case 1:
-            return 28
+            return lineHeight + 6
         case 2:
-            return 25
+            return lineHeight + 3
         case 3:
-            return 23
+            return lineHeight + 1
         default:
-            return editorLineHeight
+            return lineHeight
         }
     }
     static func editorHeadingSpacingBefore(level: Int) -> CGFloat {
@@ -100,7 +140,7 @@ enum CurrentTheme {
         }
     }
     static func editorBoldFont(matching font: NSFont) -> NSFont {
-        NSFont.monospacedSystemFont(ofSize: font.pointSize, weight: .semibold)
+        configuredFont(family: font.familyName, size: font.pointSize, weight: .semibold)
     }
     static let editorBaselineOffset: CGFloat = 1
     static let streamLabel = Font.system(size: 11, weight: .medium)
@@ -111,17 +151,38 @@ enum CurrentTheme {
     static let dayLabel = Font.system(size: 10.5, weight: .medium)
 }
 
-private func editorHeadingFontSize(level: Int) -> CGFloat {
+private func editorHeadingFontSize(level: Int, configuration: CurrentConfiguration = .default) -> CGFloat {
+    let baseSize = CurrentTheme.editorFontSize(configuration: configuration)
     switch level {
     case 1:
-        return CurrentTheme.editorFontSize + 4
+        return baseSize + 4
     case 2:
-        return CurrentTheme.editorFontSize + 2
+        return baseSize + 2
     case 3:
-        return CurrentTheme.editorFontSize + 1
+        return baseSize + 1
     default:
-        return CurrentTheme.editorFontSize
+        return baseSize
     }
+}
+
+private func configuredFont(family: String?, size: CGFloat, weight: NSFont.Weight) -> NSFont {
+    guard let family, !family.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return NSFont.monospacedSystemFont(ofSize: size, weight: weight)
+    }
+
+    let managerWeight = weight == .semibold ? 8 : 5
+    if let font = NSFontManager.shared.font(
+        withFamily: family,
+        traits: [],
+        weight: managerWeight,
+        size: size
+    ) {
+        return font
+    }
+    if let font = NSFont(name: family, size: size) {
+        return font
+    }
+    return NSFont.monospacedSystemFont(ofSize: size, weight: weight)
 }
 
 private extension NSColor {

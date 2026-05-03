@@ -3,10 +3,15 @@ import SwiftUI
 
 public struct ContentView: View {
     @ObservedObject private var controller: TimelineController
+    @ObservedObject private var configurationStore: CurrentConfigurationStore
     private let maintenanceTimer = Timer.publish(every: 45, on: .main, in: .common).autoconnect()
 
-    public init(controller: TimelineController) {
+    public init(
+        controller: TimelineController,
+        configurationStore: CurrentConfigurationStore = CurrentConfigurationStore()
+    ) {
         self.controller = controller
+        self.configurationStore = configurationStore
     }
 
     public var body: some View {
@@ -21,7 +26,11 @@ public struct ContentView: View {
         .frame(minWidth: 820, minHeight: 640)
         .background(CurrentTheme.pageBackground)
         .onAppear {
+            controller.apply(configuration: configurationStore.configuration)
             controller.bootstrapIfNeeded()
+        }
+        .onChange(of: configurationStore.configuration) { _, configuration in
+            controller.apply(configuration: configuration)
         }
         .onReceive(maintenanceTimer) { date in
             controller.handleDayRollover(now: date)
@@ -48,6 +57,7 @@ public struct ContentView: View {
             today: controller.today,
             activeDayID: controller.activeDayID,
             searchQuery: controller.searchQuery,
+            configuration: configurationStore.configuration,
             topSpacerHeight: controller.topSpacerHeight,
             bottomSpacerHeight: controller.bottomSpacerHeight,
             scrollRequest: controller.scrollRequest,
@@ -220,6 +230,7 @@ struct DaySectionView: View {
     var isToday: Bool
     var isActive: Bool
     var searchQuery: String
+    var configuration: CurrentConfiguration
     var onFocus: () -> Void
     var onChange: (String) -> Void
 
@@ -231,6 +242,7 @@ struct DaySectionView: View {
         isToday: Bool,
         isActive: Bool,
         searchQuery: String,
+        configuration: CurrentConfiguration,
         onFocus: @escaping () -> Void,
         onChange: @escaping (String) -> Void
     ) {
@@ -238,6 +250,7 @@ struct DaySectionView: View {
         self.isToday = isToday
         self.isActive = isActive
         self.searchQuery = searchQuery
+        self.configuration = configuration
         self.onFocus = onFocus
         self.onChange = onChange
         let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -286,6 +299,7 @@ struct DaySectionView: View {
             MarkdownEditorView(
                 text: $text,
                 measuredHeight: $editorHeight,
+                configuration: configuration,
                 focusOnAppear: isToday || isActive,
                 minimumHeight: minimumEditorHeight,
                 onFocus: onFocus
@@ -294,7 +308,7 @@ struct DaySectionView: View {
 
             if isToday && text.isEmpty {
                 Text("Start writing...")
-                    .font(.system(size: CurrentTheme.editorFontSize, design: .monospaced))
+                    .font(CurrentTheme.editorSwiftUIFont(configuration: configuration))
                     .foregroundStyle(CurrentTheme.mutedText)
                     .padding(.top, CurrentTheme.editorVerticalInset + 2)
                     .allowsHitTesting(false)
@@ -375,12 +389,29 @@ struct DaySectionView: View {
 
 public struct CurrentCommands: Commands {
     @ObservedObject private var controller: TimelineController
+    @ObservedObject private var configurationStore: CurrentConfigurationStore
 
-    public init(controller: TimelineController) {
+    public init(
+        controller: TimelineController,
+        configurationStore: CurrentConfigurationStore
+    ) {
         self.controller = controller
+        self.configurationStore = configurationStore
     }
 
     public var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button("Open Config File") {
+                openConfigFile()
+            }
+            .keyboardShortcut(",", modifiers: [.command])
+
+            Button("Reload Config") {
+                reloadConfig(showDiagnostics: true)
+            }
+            .keyboardShortcut(",", modifiers: [.command, .shift])
+        }
+
         CommandMenu("Stream") {
             Button("Jump to Today") {
                 controller.jumpToToday()
@@ -414,5 +445,29 @@ public struct CurrentCommands: Commands {
     private func copy(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private func openConfigFile() {
+        do {
+            let url = try configurationStore.ensureEditableConfigurationFile()
+            NSWorkspace.shared.open(url)
+        } catch {
+            controller.notice = TimelineNotice(
+                kind: .saveError,
+                title: "Could not open config",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    private func reloadConfig(showDiagnostics: Bool) {
+        let diagnostics = configurationStore.reload()
+        controller.apply(configuration: configurationStore.configuration)
+        guard showDiagnostics, !diagnostics.isEmpty else { return }
+        controller.notice = TimelineNotice(
+            kind: .info,
+            title: "Config reloaded with notes",
+            message: diagnostics.map(\.displayMessage).prefix(5).joined(separator: "\n")
+        )
     }
 }

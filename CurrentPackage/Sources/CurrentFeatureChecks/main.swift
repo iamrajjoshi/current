@@ -4,8 +4,15 @@ import CurrentFeature
 @main
 struct CurrentFeatureChecks {
     static func main() async throws {
+        try configurationLocationsPreferXDGConfig()
+        try configurationParserAppliesGhosttySyntax()
+        try configurationParserKeepsLastValidValueAndSupportsEmptyResets()
+        try configurationParserSupportsIncludesOptionalIncludesAndCycles()
+        try configurationStoreCreatesEditableTemplateOnDemand()
+        try configurationAffectsLayoutAndEditorMetrics()
         try dayPathsUseTransparentDailyMarkdownLayout()
         try bootstrapCreatesDailyStreamAndTodayFile()
+        try timelineControllerAppliesConfigurationBeforeBootstrap()
         try loadOlderDaysAppendsPastBelowToday()
         try loadOlderDaysDoesNotCreateMissingDayFiles()
         try loadOlderDaysKeepsGoingPastBlankHistoryRunway()
@@ -28,6 +35,184 @@ struct CurrentFeatureChecks {
         try streamStoreDetectsExternalConflictsBeforeOverwrite()
         try dayCacheEvictsCleanDocumentsButPinsDirtyAndToday()
         print("CurrentFeatureChecks passed")
+    }
+
+    static func configurationLocationsPreferXDGConfig() throws {
+        let root = try temporaryDirectory()
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        let xdgRoot = root.appendingPathComponent("xdg", isDirectory: true)
+        let appSupport = root.appendingPathComponent("app-support/com.raj.current", isDirectory: true)
+        let locations = CurrentConfigurationLocations(
+            environment: ["XDG_CONFIG_HOME": xdgRoot.path],
+            homeDirectory: home,
+            applicationSupportDirectory: appSupport
+        )
+
+        try check(
+            locations.primaryEditableURL.path.hasSuffix("/xdg/current/config.current"),
+            "Primary editable config should be the XDG config.current path"
+        )
+
+        try writeText("recent-days = 9", to: appSupport.appendingPathComponent("config.current"))
+        try writeText("recent-days = 4", to: xdgRoot.appendingPathComponent("current/config"))
+
+        let store = CurrentConfigurationStore(locations: locations, homeDirectory: home)
+
+        try check(store.configuration.recentDays == 4, "XDG config should win before Application Support")
+        try check(
+            store.loadedRootURL?.path.hasSuffix("/xdg/current/config") == true,
+            "Expected XDG config fallback to be the loaded root"
+        )
+    }
+
+    static func configurationParserAppliesGhosttySyntax() throws {
+        let store = try configurationStore(
+            rootConfig: """
+            # Current ignores whole-line comments.
+            font-family = "JetBrains Mono"
+            font-size = 15
+            line-height = 24
+            content-width = 760
+            recent-days = 10
+            history-batch-days = 8
+            history-window-days = 90
+            autosave-delay = 1.25
+            unknown-key = sure
+            this is not valid
+            """
+        )
+        let configuration = store.configuration
+
+        try check(configuration.fontFamily == "JetBrains Mono", "Quoted font-family did not parse")
+        try check(configuration.fontSize == 15, "font-size did not parse")
+        try check(configuration.lineHeight == 24, "line-height did not parse")
+        try check(configuration.contentWidth == 760, "content-width did not parse")
+        try check(configuration.recentDays == 10, "recent-days did not parse")
+        try check(configuration.historyBatchDays == 8, "history-batch-days did not parse")
+        try check(configuration.historyWindowDays == 90, "history-window-days did not parse")
+        try check(configuration.autosaveDelay == 1.25, "autosave-delay did not parse")
+        try check(store.diagnostics.count == 2, "Expected diagnostics for unknown and malformed lines")
+    }
+
+    static func configurationParserKeepsLastValidValueAndSupportsEmptyResets() throws {
+        let store = try configurationStore(
+            rootConfig: """
+            font-size = 16
+            font-size = no
+            line-height = 26
+            line-height =
+            recent-days = 3
+            recent-days = -1
+            content-width = 900
+            content-width =
+            """
+        )
+        let configuration = store.configuration
+
+        try check(configuration.fontSize == 16, "Invalid font-size should keep the last valid value")
+        try check(configuration.lineHeight == CurrentConfiguration.default.lineHeight, "Empty line-height should reset to default")
+        try check(configuration.recentDays == 3, "Invalid recent-days should keep the last valid value")
+        try check(configuration.contentWidth == CurrentConfiguration.default.contentWidth, "Empty content-width should reset to default")
+        try check(store.diagnostics.count == 2, "Expected diagnostics for invalid numeric values")
+    }
+
+    static func configurationParserSupportsIncludesOptionalIncludesAndCycles() throws {
+        let root = try temporaryDirectory()
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        let xdgRoot = root.appendingPathComponent("xdg", isDirectory: true)
+        let appSupport = root.appendingPathComponent("app-support/com.raj.current", isDirectory: true)
+        let configRoot = xdgRoot.appendingPathComponent("current", isDirectory: true)
+        let rootConfig = configRoot.appendingPathComponent("config.current")
+        let included = configRoot.appendingPathComponent("nested/machine.current")
+        let loop = configRoot.appendingPathComponent("loop.current")
+
+        try writeText(
+            """
+            font-size = 14
+            content-width = 650
+            config-file = nested/machine.current
+            config-file = ?missing.current
+            config-file = loop.current
+            line-height = 21
+            """,
+            to: rootConfig
+        )
+        try writeText(
+            """
+            font-size = 16
+            content-width =
+            recent-days = 11
+            """,
+            to: included
+        )
+        try writeText("config-file = config.current", to: loop)
+
+        let locations = CurrentConfigurationLocations(
+            environment: ["XDG_CONFIG_HOME": xdgRoot.path],
+            homeDirectory: home,
+            applicationSupportDirectory: appSupport
+        )
+        let store = CurrentConfigurationStore(locations: locations, homeDirectory: home)
+
+        try check(store.configuration.fontSize == 16, "Included file should override the containing file")
+        try check(store.configuration.contentWidth == CurrentConfiguration.default.contentWidth, "Included empty value should reset to default")
+        try check(store.configuration.lineHeight == 21, "Containing file values without include overrides should remain")
+        try check(store.configuration.recentDays == 11, "Included recent-days did not apply")
+        try check(
+            store.diagnostics.contains { $0.message.contains("cyclic") },
+            "Expected a cycle diagnostic for repeated config-file includes"
+        )
+        try check(
+            !store.diagnostics.contains { $0.message.contains("missing.current") },
+            "Optional missing includes should not produce diagnostics"
+        )
+    }
+
+    static func configurationStoreCreatesEditableTemplateOnDemand() throws {
+        let root = try temporaryDirectory()
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        let xdgRoot = root.appendingPathComponent("xdg", isDirectory: true)
+        let appSupport = root.appendingPathComponent("app-support/com.raj.current", isDirectory: true)
+        let locations = CurrentConfigurationLocations(
+            environment: ["XDG_CONFIG_HOME": xdgRoot.path],
+            homeDirectory: home,
+            applicationSupportDirectory: appSupport
+        )
+        let store = CurrentConfigurationStore(locations: locations, homeDirectory: home)
+
+        try check(store.loadedRootURL == nil, "No config should be loaded before one exists")
+
+        let url = try store.ensureEditableConfigurationFile()
+        let text = try String(contentsOf: url, encoding: .utf8)
+
+        try check(url == locations.primaryEditableURL, "Open Config File should create the primary XDG config.current")
+        try check(text.contains("# Current configuration"), "Editable template should contain commented defaults")
+        try check(CurrentConfigurationStore(locations: locations, homeDirectory: home).diagnostics.isEmpty, "Comment-only template should parse cleanly")
+    }
+
+    static func configurationAffectsLayoutAndEditorMetrics() throws {
+        let configuration = CurrentConfiguration(fontSize: 18, lineHeight: 30, contentWidth: 640)
+        let defaultHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: "A configured editor line",
+            width: 640,
+            minimumHeight: 0
+        )
+        let configuredHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: "A configured editor line",
+            width: 640,
+            minimumHeight: 0,
+            configuration: configuration
+        )
+
+        try check(
+            TimelineLayoutMetrics.itemWidth(availableWidth: 820, configuration: configuration) == 640,
+            "Configured content width should control timeline item width"
+        )
+        try check(
+            TimelineLayoutMetrics.horizontalInset(availableWidth: 820, configuration: configuration) == 90,
+            "Configured content width should recenter the writing column"
+        )
+        try check(configuredHeight > defaultHeight, "Configured editor font/line metrics should affect measured height")
     }
 
     static func dayPathsUseTransparentDailyMarkdownLayout() throws {
@@ -61,6 +246,36 @@ struct CurrentFeatureChecks {
         try check(
             FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-29.md").path),
             "Today file was not created"
+        )
+    }
+
+    @MainActor
+    static func timelineControllerAppliesConfigurationBeforeBootstrap() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let controller = TimelineController(
+            store: StreamStore(libraryRoot: root, calendar: calendar),
+            cache: DayCache(calendar: calendar),
+            now: now
+        )
+
+        controller.apply(configuration: CurrentConfiguration(
+            recentDays: 3,
+            historyBatchDays: 4,
+            historyWindowDays: 9,
+            autosaveDelay: 1.2
+        ))
+        controller.bootstrapIfNeeded(now: now)
+        controller.loadOlderDays()
+
+        try check(controller.recentDayCount == 3, "Controller did not apply configured recent days")
+        try check(controller.historyBatchSize == 4, "Controller did not apply configured batch size")
+        try check(controller.historyWindowDayCount == 9, "Controller did not apply configured history window size")
+        try check(controller.autosaveDelay == 1.2, "Controller did not apply configured autosave delay")
+        try check(
+            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
+            "Configured recent and batch day counts should drive launch and older history"
         )
     }
 
@@ -563,11 +778,35 @@ struct CurrentFeatureChecks {
         try check(evicted.count == 2, "Expected 2 evicted clean documents, got \(evicted.count)")
     }
 
-    static func temporaryRoot() throws -> URL {
+    static func configurationStore(rootConfig: String) throws -> CurrentConfigurationStore {
+        let root = try temporaryDirectory()
+        let home = root.appendingPathComponent("home", isDirectory: true)
+        let xdgRoot = root.appendingPathComponent("xdg", isDirectory: true)
+        let appSupport = root.appendingPathComponent("app-support/com.raj.current", isDirectory: true)
+        let locations = CurrentConfigurationLocations(
+            environment: ["XDG_CONFIG_HOME": xdgRoot.path],
+            homeDirectory: home,
+            applicationSupportDirectory: appSupport
+        )
+
+        try writeText(rootConfig, to: locations.primaryEditableURL)
+        return CurrentConfigurationStore(locations: locations, homeDirectory: home)
+    }
+
+    static func writeText(_ text: String, to url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try text.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    static func temporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("CurrentChecks-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url.appendingPathComponent("Current", isDirectory: true)
+        return url
+    }
+
+    static func temporaryRoot() throws -> URL {
+        try temporaryDirectory().appendingPathComponent("Current", isDirectory: true)
     }
 
     static func writeDay(_ date: Date, text: String, stream: CurrentFeature.Stream, store: StreamStore) throws {

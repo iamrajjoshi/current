@@ -6,6 +6,7 @@ struct TimelineCollectionView: NSViewRepresentable {
     var today: Date
     var activeDayID: String?
     var searchQuery: String
+    var configuration: CurrentConfiguration
     var topSpacerHeight: CGFloat
     var bottomSpacerHeight: CGFloat
     var scrollRequest: TimelineScrollRequest?
@@ -33,8 +34,14 @@ struct TimelineCollectionView: NSViewRepresentable {
         let layout = NSCollectionViewFlowLayout()
         layout.scrollDirection = .vertical
         layout.minimumLineSpacing = 0
-        layout.minimumInteritemSpacing = TimelineLayoutMetrics.minimumInteritemSpacing(availableWidth: 1)
-        layout.sectionInset = TimelineLayoutMetrics.sectionInset(availableWidth: 1)
+        layout.minimumInteritemSpacing = TimelineLayoutMetrics.minimumInteritemSpacing(
+            availableWidth: 1,
+            configuration: configuration
+        )
+        layout.sectionInset = TimelineLayoutMetrics.sectionInset(
+            availableWidth: 1,
+            configuration: configuration
+        )
 
         let collectionView = NSCollectionView()
         collectionView.collectionViewLayout = layout
@@ -85,7 +92,8 @@ public enum TimelineRowHeightCalculator {
         for document: DayDocument,
         isToday: Bool,
         isActive: Bool = false,
-        width: CGFloat = 700
+        width: CGFloat = 700,
+        configuration: CurrentConfiguration = .default
     ) -> CGFloat {
         let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard isToday || isActive || hasText else {
@@ -97,7 +105,8 @@ public enum TimelineRowHeightCalculator {
         let editorHeight = measuredEditorHeight(
             text: document.text,
             width: editorWidth,
-            minimumHeight: minimumEditorHeight
+            minimumHeight: minimumEditorHeight,
+            configuration: configuration
         )
 
         return ceil(
@@ -111,7 +120,8 @@ public enum TimelineRowHeightCalculator {
     public static func measuredEditorHeight(
         text: String,
         width: CGFloat = 700,
-        minimumHeight: CGFloat = expandedEditorMinimumHeight
+        minimumHeight: CGFloat = expandedEditorMinimumHeight,
+        configuration: CurrentConfiguration = .default
     ) -> CGFloat {
         let storage = NSTextStorage(string: text)
         let layoutManager = NSLayoutManager()
@@ -119,8 +129,8 @@ public enum TimelineRowHeightCalculator {
             size: NSSize(width: max(1, width), height: CGFloat.greatestFiniteMagnitude)
         )
         let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = CurrentTheme.editorLineHeight
-        paragraph.maximumLineHeight = CurrentTheme.editorLineHeight
+        paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
+        paragraph.maximumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
         paragraph.lineBreakMode = .byWordWrapping
 
         textContainer.lineFragmentPadding = 0
@@ -128,7 +138,7 @@ public enum TimelineRowHeightCalculator {
         storage.addLayoutManager(layoutManager)
         storage.addAttributes(
             [
-                .font: CurrentTheme.editorFont,
+                .font: CurrentTheme.editorFont(configuration: configuration),
                 .foregroundColor: CurrentTheme.primaryTextColor,
                 .paragraphStyle: paragraph,
                 .baselineOffset: CurrentTheme.editorBaselineOffset
@@ -146,23 +156,32 @@ public enum TimelineRowHeightCalculator {
 }
 
 public enum TimelineLayoutMetrics {
-    public static func itemWidth(availableWidth: CGFloat) -> CGFloat {
+    public static func itemWidth(
+        availableWidth: CGFloat,
+        configuration: CurrentConfiguration = .default
+    ) -> CGFloat {
         min(
-            CurrentTheme.contentMaxWidth,
+            CurrentTheme.contentMaxWidth(configuration: configuration),
             max(1, availableWidth - CurrentTheme.timelineHorizontalPadding * 2)
         )
     }
 
-    public static func horizontalInset(availableWidth: CGFloat) -> CGFloat {
-        let width = itemWidth(availableWidth: max(1, availableWidth))
+    public static func horizontalInset(
+        availableWidth: CGFloat,
+        configuration: CurrentConfiguration = .default
+    ) -> CGFloat {
+        let width = itemWidth(availableWidth: max(1, availableWidth), configuration: configuration)
         return max(
             CurrentTheme.timelineHorizontalPadding,
             floor((max(1, availableWidth) - width) / 2)
         )
     }
 
-    public static func sectionInset(availableWidth: CGFloat) -> NSEdgeInsets {
-        let horizontalInset = horizontalInset(availableWidth: availableWidth)
+    public static func sectionInset(
+        availableWidth: CGFloat,
+        configuration: CurrentConfiguration = .default
+    ) -> NSEdgeInsets {
+        let horizontalInset = horizontalInset(availableWidth: availableWidth, configuration: configuration)
         return NSEdgeInsets(
             top: CurrentTheme.timelineTopPadding,
             left: horizontalInset,
@@ -171,7 +190,10 @@ public enum TimelineLayoutMetrics {
         )
     }
 
-    public static func minimumInteritemSpacing(availableWidth: CGFloat) -> CGFloat {
+    public static func minimumInteritemSpacing(
+        availableWidth: CGFloat,
+        configuration: CurrentConfiguration = .default
+    ) -> CGFloat {
         max(1, availableWidth)
     }
 }
@@ -312,6 +334,7 @@ extension TimelineCollectionView {
                     isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
                     isActive: document.id == parent.activeDayID,
                     searchQuery: parent.searchQuery,
+                    configuration: parent.configuration,
                     onFocus: parent.onFocus,
                     onChange: parent.onChange
                 )
@@ -333,7 +356,8 @@ extension TimelineCollectionView {
                     for: document,
                     isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
                     isActive: document.id == parent.activeDayID,
-                    width: width
+                    width: width,
+                    configuration: parent.configuration
                 )
                 return NSSize(width: width, height: height)
             }
@@ -344,7 +368,10 @@ extension TimelineCollectionView {
             layout collectionViewLayout: NSCollectionViewLayout,
             insetForSectionAt section: Int
         ) -> NSEdgeInsets {
-            TimelineLayoutMetrics.sectionInset(availableWidth: viewportWidth(in: collectionView))
+            TimelineLayoutMetrics.sectionInset(
+                availableWidth: viewportWidth(in: collectionView),
+                configuration: parent.configuration
+            )
         }
 
         func collectionView(
@@ -360,7 +387,10 @@ extension TimelineCollectionView {
             layout collectionViewLayout: NSCollectionViewLayout,
             minimumInteritemSpacingForSectionAt section: Int
         ) -> CGFloat {
-            TimelineLayoutMetrics.minimumInteritemSpacing(availableWidth: viewportWidth(in: collectionView))
+            TimelineLayoutMetrics.minimumInteritemSpacing(
+                availableWidth: viewportWidth(in: collectionView),
+                configuration: parent.configuration
+            )
         }
 
         @objc private func viewportDidChange(_ notification: Notification) {
@@ -413,8 +443,14 @@ extension TimelineCollectionView {
 
         private func updateFlowLayoutForViewportWidth(_ width: CGFloat) {
             guard let layout = collectionView?.collectionViewLayout as? NSCollectionViewFlowLayout else { return }
-            let targetInset = TimelineLayoutMetrics.sectionInset(availableWidth: width)
-            let targetInteritemSpacing = TimelineLayoutMetrics.minimumInteritemSpacing(availableWidth: width)
+            let targetInset = TimelineLayoutMetrics.sectionInset(
+                availableWidth: width,
+                configuration: parent.configuration
+            )
+            let targetInteritemSpacing = TimelineLayoutMetrics.minimumInteritemSpacing(
+                availableWidth: width,
+                configuration: parent.configuration
+            )
             let insetChanged = abs(layout.sectionInset.left - targetInset.left) > 0.5
                 || abs(layout.sectionInset.right - targetInset.right) > 0.5
             let spacingChanged = abs(layout.minimumInteritemSpacing - targetInteritemSpacing) > 0.5
@@ -540,6 +576,7 @@ extension TimelineCollectionView {
                     isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
                     isActive: document.id == parent.activeDayID,
                     searchQuery: parent.searchQuery,
+                    configuration: parent.configuration,
                     onFocus: parent.onFocus,
                     onChange: parent.onChange
                 )
@@ -552,7 +589,10 @@ extension TimelineCollectionView {
         }
 
         private func itemWidth(in collectionView: NSCollectionView) -> CGFloat {
-            TimelineLayoutMetrics.itemWidth(availableWidth: viewportWidth(in: collectionView))
+            TimelineLayoutMetrics.itemWidth(
+                availableWidth: viewportWidth(in: collectionView),
+                configuration: parent.configuration
+            )
         }
 
         private func viewportWidth(in collectionView: NSCollectionView) -> CGFloat {
@@ -608,6 +648,7 @@ final class TimelineDayCollectionItem: NSCollectionViewItem {
         isToday: Bool,
         isActive: Bool,
         searchQuery: String,
+        configuration: CurrentConfiguration,
         onFocus: @escaping (Date) -> Void,
         onChange: @escaping (Date, String) -> Void
     ) {
@@ -622,6 +663,7 @@ final class TimelineDayCollectionItem: NSCollectionViewItem {
             isToday: isToday,
             isActive: isActive,
             searchQuery: searchQuery,
+            configuration: configuration,
             onFocus: {
                 onFocus(document.date)
             },
