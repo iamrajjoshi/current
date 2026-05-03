@@ -47,6 +47,7 @@ final class MarkdownSyntaxHighlighter {
             protectedRanges: protectedRanges,
             groups: [(1, [.foregroundColor: syntaxColor])]
         )
+        applyTaskCheckboxes(to: textStorage, protectedRanges: protectedRanges)
         applyListParagraphStyles(to: textStorage, protectedRanges: protectedRanges)
         applyGroups(
             pattern: #"(`+)([^`\n]+)(\1)"#,
@@ -73,6 +74,17 @@ final class MarkdownSyntaxHighlighter {
             ]
         )
         applyUnderline(to: textStorage, protectedRanges: protectedRanges)
+        applyGroups(
+            pattern: #"(?<!~)~~([^~\n]+)~~(?!~)"#,
+            to: textStorage,
+            protectedRanges: protectedRanges,
+            groups: [
+                (1, [.strikethroughStyle: NSUnderlineStyle.single.rawValue])
+            ]
+        )
+        apply(pattern: #"(?<!~)~~|~~(?!~)"#, to: textStorage, protectedRanges: protectedRanges, attributes: [
+            .foregroundColor: syntaxColor
+        ])
         applyBold(pattern: #"(?<!\*)\*\*([^*\n]+)\*\*(?!\*)"#, to: textStorage, protectedRanges: protectedRanges)
         apply(pattern: #"(?<!\*)\*\*|\*\*(?!\*)"#, to: textStorage, protectedRanges: protectedRanges, attributes: [
             .foregroundColor: syntaxColor
@@ -107,7 +119,10 @@ final class MarkdownSyntaxHighlighter {
     }
 
     private var syntaxColor: NSColor {
-        CurrentTheme.mutedTextColor
+        switch configuration.markdownMarkerVisibility {
+        case .muted:
+            return CurrentTheme.mutedTextColor
+        }
     }
 
     private var codeColor: NSColor {
@@ -272,6 +287,31 @@ final class MarkdownSyntaxHighlighter {
                 .font: CurrentTheme.editorBoldFont(matching: currentFont)
             ], range: contentRange)
         }
+    }
+
+    private func applyTaskCheckboxes(to textStorage: NSTextStorage, protectedRanges: [NSRange]) {
+        applyGroups(
+            pattern: #"(?m)^[ \t]*(?:[-*+]|\d+\.)[ \t]+(\[[ xX]\])"#,
+            to: textStorage,
+            protectedRanges: protectedRanges,
+            groups: [
+                (1, [
+                    .font: CurrentTheme.editorBoldFont(configuration: configuration),
+                    .foregroundColor: CurrentTheme.mutedTextColor
+                ])
+            ]
+        )
+        applyGroups(
+            pattern: #"(?m)^[ \t]*(?:[-*+]|\d+\.)[ \t]+(\[[xX]\])"#,
+            to: textStorage,
+            protectedRanges: protectedRanges,
+            groups: [
+                (1, [
+                    .font: CurrentTheme.editorBoldFont(configuration: configuration),
+                    .foregroundColor: CurrentTheme.accentColor
+                ])
+            ]
+        )
     }
 
     private func applyListParagraphStyles(to textStorage: NSTextStorage, protectedRanges: [NSRange]) {

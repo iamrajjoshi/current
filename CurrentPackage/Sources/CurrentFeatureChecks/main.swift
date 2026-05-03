@@ -15,7 +15,8 @@ struct CurrentFeatureChecks {
         try timelineControllerAppliesConfigurationBeforeBootstrap()
         try loadOlderDaysAppendsPastBelowToday()
         try loadOlderDaysDoesNotCreateMissingDayFiles()
-        try loadOlderDaysKeepsGoingPastBlankHistoryRunway()
+        try loadOlderDaysStopsAtStreamCreation()
+        try hideEmptyWeekendsConfigurationControlsTimeline()
         try loadOlderDaysKeepsRenderedHistoryBounded()
         try loadOlderDaysKeepsOlderActualFilesReachable()
         try loadNewerWindowRestoresTrimmedTopHistory()
@@ -28,6 +29,10 @@ struct CurrentFeatureChecks {
         try timelineLayoutMetricsCenterTheWritingColumn()
         try timelineLayoutMetricsPreventWideViewportWrapping()
         try markdownListEditingContinuesCommonLists()
+        try markdownTaskEditingTogglesCurrentLine()
+        try markdownInlineFormattingWrapsSelectedText()
+        try markdownInlineFormattingInsertsEmptyPairs()
+        try markdownInlineFormattingLinksSelectedTextWithClipboardURL()
         try markdownHeadingRenderingTracksNotionLikeShortcuts()
         try markdownHeadingBackspaceExitsBlock()
         try await autosaveWritesOnlyTheEditedDay()
@@ -77,6 +82,8 @@ struct CurrentFeatureChecks {
             history-batch-days = 8
             history-window-days = 90
             autosave-delay = 1.25
+            hide-empty-weekends = true
+            markdown-marker-visibility = muted
             unknown-key = sure
             this is not valid
             """
@@ -91,6 +98,8 @@ struct CurrentFeatureChecks {
         try check(configuration.historyBatchDays == 8, "history-batch-days did not parse")
         try check(configuration.historyWindowDays == 90, "history-window-days did not parse")
         try check(configuration.autosaveDelay == 1.25, "autosave-delay did not parse")
+        try check(configuration.hideEmptyWeekends == true, "hide-empty-weekends did not parse")
+        try check(configuration.markdownMarkerVisibility == .muted, "markdown-marker-visibility did not parse")
         try check(store.diagnostics.count == 2, "Expected diagnostics for unknown and malformed lines")
     }
 
@@ -105,6 +114,10 @@ struct CurrentFeatureChecks {
             recent-days = -1
             content-width = 900
             content-width =
+            hide-empty-weekends = yes
+            hide-empty-weekends = maybe
+            hide-empty-weekends =
+            markdown-marker-visibility = hidden
             """
         )
         let configuration = store.configuration
@@ -113,7 +126,9 @@ struct CurrentFeatureChecks {
         try check(configuration.lineHeight == CurrentConfiguration.default.lineHeight, "Empty line-height should reset to default")
         try check(configuration.recentDays == 3, "Invalid recent-days should keep the last valid value")
         try check(configuration.contentWidth == CurrentConfiguration.default.contentWidth, "Empty content-width should reset to default")
-        try check(store.diagnostics.count == 2, "Expected diagnostics for invalid numeric values")
+        try check(configuration.hideEmptyWeekends == CurrentConfiguration.default.hideEmptyWeekends, "Empty hide-empty-weekends should reset to default")
+        try check(configuration.markdownMarkerVisibility == .muted, "Invalid marker visibility should keep the default")
+        try check(store.diagnostics.count == 4, "Expected diagnostics for invalid numeric, boolean, and marker values")
     }
 
     static func configurationParserSupportsIncludesOptionalIncludesAndCycles() throws {
@@ -187,6 +202,8 @@ struct CurrentFeatureChecks {
 
         try check(url == locations.primaryEditableURL, "Open Config File should create the primary XDG config.current")
         try check(text.contains("# Current configuration"), "Editable template should contain commented defaults")
+        try check(text.contains("# hide-empty-weekends = false"), "Editable template should document weekend hiding")
+        try check(text.contains("# markdown-marker-visibility = muted"), "Editable template should document marker visibility")
         try check(CurrentConfigurationStore(locations: locations, homeDirectory: home).diagnostics.isEmpty, "Comment-only template should parse cleanly")
     }
 
@@ -242,7 +259,7 @@ struct CurrentFeatureChecks {
         controller.bootstrapIfNeeded(now: now)
 
         try check(controller.stream?.name == "Daily", "Expected Daily stream")
-        try check(controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27"], "Unexpected visible days")
+        try check(controller.days.map(\.id) == ["2026-04-29"], "Bootstrap should not render blank days before stream creation")
         try check(
             FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-29.md").path),
             "Today file was not created"
@@ -254,8 +271,10 @@ struct CurrentFeatureChecks {
         let root = try temporaryRoot()
         let calendar = fixedCalendar()
         let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let createdAt = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 23, hour: 9)))
+        let store = try storeWithDefaultStreamCreatedAt(createdAt, root: root, calendar: calendar)
         let controller = TimelineController(
-            store: StreamStore(libraryRoot: root, calendar: calendar),
+            store: store,
             cache: DayCache(calendar: calendar),
             now: now
         )
@@ -275,7 +294,7 @@ struct CurrentFeatureChecks {
         try check(controller.autosaveDelay == 1.2, "Controller did not apply configured autosave delay")
         try check(
             controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
-            "Configured recent and batch day counts should drive launch and older history"
+            "Configured recent and batch day counts should drive launch and older history, got \(controller.days.map(\.id))"
         )
     }
 
@@ -284,8 +303,10 @@ struct CurrentFeatureChecks {
         let root = try temporaryRoot()
         let calendar = fixedCalendar()
         let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let createdAt = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 25, hour: 9)))
+        let store = try storeWithDefaultStreamCreatedAt(createdAt, root: root, calendar: calendar)
         let controller = TimelineController(
-            store: StreamStore(libraryRoot: root, calendar: calendar),
+            store: store,
             cache: DayCache(calendar: calendar),
             recentDayCount: 2,
             historyBatchSize: 3,
@@ -306,8 +327,10 @@ struct CurrentFeatureChecks {
         let root = try temporaryRoot()
         let calendar = fixedCalendar()
         let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let createdAt = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 23, hour: 9)))
+        let store = try storeWithDefaultStreamCreatedAt(createdAt, root: root, calendar: calendar)
         let controller = TimelineController(
-            store: StreamStore(libraryRoot: root, calendar: calendar),
+            store: store,
             cache: DayCache(calendar: calendar),
             recentDayCount: 2,
             historyBatchSize: 5,
@@ -328,12 +351,14 @@ struct CurrentFeatureChecks {
     }
 
     @MainActor
-    static func loadOlderDaysKeepsGoingPastBlankHistoryRunway() throws {
+    static func loadOlderDaysStopsAtStreamCreation() throws {
         let root = try temporaryRoot()
         let calendar = fixedCalendar()
         let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let createdAt = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 26, hour: 9)))
+        let store = try storeWithDefaultStreamCreatedAt(createdAt, root: root, calendar: calendar)
         let controller = TimelineController(
-            store: StreamStore(libraryRoot: root, calendar: calendar),
+            store: store,
             cache: DayCache(calendar: calendar),
             recentDayCount: 2,
             historyBatchSize: 5,
@@ -343,17 +368,45 @@ struct CurrentFeatureChecks {
 
         controller.loadOlderDays()
         controller.loadOlderDays()
-        controller.loadOlderDays()
-        controller.loadOlderDays()
 
         try check(
-            controller.days.last?.id == "2026-04-08",
-            "Blank placeholder history should keep extending instead of stopping at a runway"
+            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26"],
+            "Blank placeholder history should stop at the stream creation day"
         )
-        try check(controller.canLoadOlderDays == true, "History loader should remain available for endless scrollback")
+        try check(controller.canLoadOlderDays == false, "History loader should stop when there are no older blanks or files")
         try check(
-            !FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-23.md").path),
+            !FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-25.md").path),
             "Blank history days should stay in memory until edited"
+        )
+    }
+
+    @MainActor
+    static func hideEmptyWeekendsConfigurationControlsTimeline() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 5, day: 4, hour: 9)))
+        let createdAt = try require(calendar.date(from: DateComponents(year: 2026, month: 5, day: 1, hour: 9)))
+        let store = try storeWithDefaultStreamCreatedAt(createdAt, root: root, calendar: calendar)
+        let stream = try store.defaultStream()
+        let saturday = try require(calendar.date(from: DateComponents(year: 2026, month: 5, day: 2, hour: 9)))
+        try writeDay(saturday, text: "Weekend note", stream: stream, store: store)
+
+        let controller = TimelineController(
+            store: store,
+            cache: DayCache(calendar: calendar),
+            recentDayCount: 4,
+            now: now
+        )
+        controller.apply(configuration: CurrentConfiguration(hideEmptyWeekends: true))
+        controller.bootstrapIfNeeded(now: now)
+
+        try check(
+            controller.days.map(\.id) == ["2026-05-04", "2026-05-02", "2026-05-01"],
+            "Empty Sundays should hide, but weekend notes and weekdays should stay visible"
+        )
+        try check(
+            controller.days.first { $0.id == "2026-05-02" }?.text == "Weekend note",
+            "Weekend notes should remain loaded when empty weekends are hidden"
         )
     }
 
@@ -362,8 +415,10 @@ struct CurrentFeatureChecks {
         let root = try temporaryRoot()
         let calendar = fixedCalendar()
         let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let createdAt = try require(calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9)))
+        let store = try storeWithDefaultStreamCreatedAt(createdAt, root: root, calendar: calendar)
         let controller = TimelineController(
-            store: StreamStore(libraryRoot: root, calendar: calendar),
+            store: store,
             cache: DayCache(calendar: calendar),
             recentDayCount: 2,
             historyBatchSize: 5,
@@ -428,8 +483,10 @@ struct CurrentFeatureChecks {
         let root = try temporaryRoot()
         let calendar = fixedCalendar()
         let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let createdAt = try require(calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9)))
+        let store = try storeWithDefaultStreamCreatedAt(createdAt, root: root, calendar: calendar)
         let controller = TimelineController(
-            store: StreamStore(libraryRoot: root, calendar: calendar),
+            store: store,
             cache: DayCache(calendar: calendar),
             recentDayCount: 2,
             historyBatchSize: 5,
@@ -461,7 +518,8 @@ struct CurrentFeatureChecks {
         let calendar = fixedCalendar()
         let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
         let noteDate = calendar.addingDays(-1, to: now)
-        let store = StreamStore(libraryRoot: root, calendar: calendar)
+        let createdAt = try require(calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9)))
+        let store = try storeWithDefaultStreamCreatedAt(createdAt, root: root, calendar: calendar)
         let stream = try store.defaultStream()
         try writeDay(noteDate, text: "Persisted recent note", stream: stream, store: store)
         let controller = TimelineController(
@@ -496,7 +554,8 @@ struct CurrentFeatureChecks {
         let root = try temporaryRoot()
         let calendar = fixedCalendar()
         let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
-        let store = StreamStore(libraryRoot: root, calendar: calendar)
+        let createdAt = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 1, hour: 9)))
+        let store = try storeWithDefaultStreamCreatedAt(createdAt, root: root, calendar: calendar)
         let controller = TimelineController(
             store: store,
             cache: DayCache(calendar: calendar),
@@ -631,6 +690,90 @@ struct CurrentFeatureChecks {
         try check(fencedEdit == nil, "Lists should not auto-continue inside fenced code")
     }
 
+    static func markdownTaskEditingTogglesCurrentLine() throws {
+        let unchecked = "- [ ] Follow up"
+        let uncheckedEdit = try require(MarkdownListEditing.taskToggleEdit(
+            in: unchecked,
+            selectedRange: NSRange(location: unchecked.utf16.count, length: 0)
+        ))
+        try check(uncheckedEdit.range == NSRange(location: 3, length: 1), "Unchecked task should replace only the checkbox state")
+        try check(uncheckedEdit.replacement == "x", "Unchecked task should become checked")
+        try check(uncheckedEdit.selectedRangeAfterEdit == NSRange(location: unchecked.utf16.count, length: 0), "Task toggle should preserve selection")
+
+        let checked = "Before\n1. [x] Done\nAfter"
+        let checkedEdit = try require(MarkdownListEditing.taskToggleEdit(
+            in: checked,
+            selectedRange: NSRange(location: "Before\n1. [x]".utf16.count, length: 0)
+        ))
+        try check(checkedEdit.replacement == " ", "Checked ordered task should become unchecked")
+
+        let plain = MarkdownListEditing.taskToggleEdit(
+            in: "- ordinary item",
+            selectedRange: NSRange(location: 3, length: 0)
+        )
+        try check(plain == nil, "Non-task list items should not toggle")
+
+        let fenced = "```\n- [ ] code\n```"
+        let fencedEdit = MarkdownListEditing.taskToggleEdit(
+            in: fenced,
+            selectedRange: NSRange(location: "```\n- [ ]".utf16.count, length: 0)
+        )
+        try check(fencedEdit == nil, "Tasks should not toggle inside fenced code")
+    }
+
+    static func markdownInlineFormattingWrapsSelectedText() throws {
+        try checkInlineFormatting(kind: .bold, markerOpen: "**", markerClose: "**")
+        try checkInlineFormatting(kind: .italic, markerOpen: "*", markerClose: "*")
+        try checkInlineFormatting(kind: .underline, markerOpen: "<u>", markerClose: "</u>")
+        try checkInlineFormatting(kind: .strikethrough, markerOpen: "~~", markerClose: "~~")
+        try checkInlineFormatting(kind: .inlineCode, markerOpen: "`", markerClose: "`")
+    }
+
+    static func markdownInlineFormattingInsertsEmptyPairs() throws {
+        let text = "One two"
+        let edit = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .underline,
+            in: text,
+            selectedRange: NSRange(location: 3, length: 0)
+        ))
+
+        try check(edit.range == NSRange(location: 3, length: 0), "Empty formatting should insert at the cursor")
+        try check(edit.replacement == "<u></u>", "Underline empty insertion should use HTML markers")
+        try check(edit.selectedRangeAfterEdit == NSRange(location: 6, length: 0), "Cursor should land inside inserted underline markers")
+    }
+
+    static func markdownInlineFormattingLinksSelectedTextWithClipboardURL() throws {
+        let text = "Read docs today"
+        let edit = try require(MarkdownInlineFormatting.linkEdit(
+            in: text,
+            selectedRange: NSRange(location: 5, length: 4),
+            urlString: " https://example.com/docs "
+        ))
+
+        try check(edit.range == NSRange(location: 5, length: 4), "Link edit should replace only selected text")
+        try check(edit.replacement == "[docs](https://example.com/docs)", "Link edit should use the trimmed URL")
+        try check(edit.selectedRangeAfterEdit == NSRange(location: 37, length: 0), "Cursor should land after the inserted link")
+
+        let invalidURL = MarkdownInlineFormatting.linkEdit(
+            in: text,
+            selectedRange: NSRange(location: 5, length: 4),
+            urlString: "not a url"
+        )
+        try check(invalidURL == nil, "Invalid clipboard URL should not produce a link edit")
+
+        let emptySelection = MarkdownInlineFormatting.linkEdit(
+            in: text,
+            selectedRange: NSRange(location: 5, length: 0),
+            urlString: "https://example.com/docs"
+        )
+        try check(emptySelection == nil, "Link shortcut should require selected text")
+
+        try check(
+            MarkdownInlineFormatting.validLinkURLString(from: "mailto:hello@example.com") == "mailto:hello@example.com",
+            "Mailto links should be accepted"
+        )
+    }
+
     static func checkContinuation(_ text: String, replacement: String) throws {
         let edit = try require(MarkdownListEditing.continuationEdit(
             in: text,
@@ -638,6 +781,26 @@ struct CurrentFeatureChecks {
         ))
         try check(edit.range == NSRange(location: text.utf16.count, length: 0), "Continuation should insert at cursor")
         try check(edit.replacement == replacement, "Unexpected continuation replacement: \(edit.replacement)")
+    }
+
+    static func checkInlineFormatting(
+        kind: MarkdownInlineFormatting.Kind,
+        markerOpen: String,
+        markerClose: String
+    ) throws {
+        let text = "Format me"
+        let edit = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: kind,
+            in: text,
+            selectedRange: NSRange(location: 7, length: 2)
+        ))
+
+        try check(edit.range == NSRange(location: 7, length: 2), "Inline formatting should replace the selected range")
+        try check(edit.replacement == "\(markerOpen)me\(markerClose)", "Unexpected inline formatting replacement")
+        try check(
+            edit.selectedRangeAfterEdit == NSRange(location: 7 + markerOpen.utf16.count, length: 2),
+            "Inline formatting should keep the original content selected inside the markers"
+        )
     }
 
     static func markdownHeadingRenderingTracksNotionLikeShortcuts() throws {
@@ -709,8 +872,9 @@ struct CurrentFeatureChecks {
         let calendar = fixedCalendar()
         let april29 = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 23)))
         let april30 = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 30, hour: 1)))
+        let store = try storeWithDefaultStreamCreatedAt(april29, root: root, calendar: calendar)
         let controller = TimelineController(
-            store: StreamStore(libraryRoot: root, calendar: calendar),
+            store: store,
             cache: DayCache(calendar: calendar),
             recentDayCount: 2,
             now: april29
@@ -721,6 +885,7 @@ struct CurrentFeatureChecks {
 
         try check(controller.today == calendar.startOfDay(for: april30), "Today did not roll forward")
         try check(controller.days.map(\.id).first == "2026-04-30", "New today is not at the top")
+        try check(controller.days.map(\.id).contains("2026-04-29"), "Rollover should keep post-creation history visible")
         try check(
             FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-30.md").path),
             "Rolled-over day file was not created"
@@ -807,6 +972,18 @@ struct CurrentFeatureChecks {
 
     static func temporaryRoot() throws -> URL {
         try temporaryDirectory().appendingPathComponent("Current", isDirectory: true)
+    }
+
+    static func storeWithDefaultStreamCreatedAt(_ createdAt: Date, root: URL, calendar: Calendar) throws -> StreamStore {
+        let store = StreamStore(libraryRoot: root, calendar: calendar)
+        var stream = try store.defaultStream()
+        stream.createdAt = createdAt
+        let metadataURL = stream.rootURL.appendingPathComponent(".current-stream.json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(stream).write(to: metadataURL, options: [.atomic])
+        return store
     }
 
     static func writeDay(_ date: Date, text: String, stream: CurrentFeature.Stream, store: StreamStore) throws {

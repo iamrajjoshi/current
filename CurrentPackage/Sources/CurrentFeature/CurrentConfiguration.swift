@@ -1,6 +1,10 @@
 import Combine
 import Foundation
 
+public enum MarkdownMarkerVisibility: String, Equatable, Hashable, Sendable {
+    case muted
+}
+
 public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     public static let defaultFontFamily: String? = nil
     public static let defaultFontSize: Double = 13
@@ -10,6 +14,8 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     public static let defaultHistoryBatchDays = 14
     public static let defaultHistoryWindowDays = 180
     public static let defaultAutosaveDelay: Double = 0.55
+    public static let defaultHideEmptyWeekends = false
+    public static let defaultMarkdownMarkerVisibility = MarkdownMarkerVisibility.muted
 
     public var fontFamily: String?
     public var fontSize: Double
@@ -19,6 +25,8 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     public var historyBatchDays: Int
     public var historyWindowDays: Int
     public var autosaveDelay: Double
+    public var hideEmptyWeekends: Bool
+    public var markdownMarkerVisibility: MarkdownMarkerVisibility
 
     public init(
         fontFamily: String? = Self.defaultFontFamily,
@@ -28,7 +36,9 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
         recentDays: Int = Self.defaultRecentDays,
         historyBatchDays: Int = Self.defaultHistoryBatchDays,
         historyWindowDays: Int = Self.defaultHistoryWindowDays,
-        autosaveDelay: Double = Self.defaultAutosaveDelay
+        autosaveDelay: Double = Self.defaultAutosaveDelay,
+        hideEmptyWeekends: Bool = Self.defaultHideEmptyWeekends,
+        markdownMarkerVisibility: MarkdownMarkerVisibility = Self.defaultMarkdownMarkerVisibility
     ) {
         self.fontFamily = fontFamily
         self.fontSize = fontSize
@@ -38,6 +48,8 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
         self.historyBatchDays = historyBatchDays
         self.historyWindowDays = historyWindowDays
         self.autosaveDelay = autosaveDelay
+        self.hideEmptyWeekends = hideEmptyWeekends
+        self.markdownMarkerVisibility = markdownMarkerVisibility
     }
 
     public static let `default` = CurrentConfiguration()
@@ -55,6 +67,8 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     # history-batch-days = 14
     # history-window-days = 180
     # autosave-delay = 0.55
+    # hide-empty-weekends = false
+    # markdown-marker-visibility = muted
     #
     # Split config into another file:
     # config-file = extras.current
@@ -477,6 +491,28 @@ private enum CurrentConfigurationLoader {
             ) {
                 context.configuration.autosaveDelay = parsed
             }
+        case "hide-empty-weekends":
+            if let parsed = parsedBool(
+                value,
+                key: key,
+                defaultValue: CurrentConfiguration.default.hideEmptyWeekends,
+                lineNumber: lineNumber,
+                url: url,
+                context: &context
+            ) {
+                context.configuration.hideEmptyWeekends = parsed
+            }
+        case "markdown-marker-visibility":
+            if let parsed = parsedMarkdownMarkerVisibility(
+                value,
+                key: key,
+                defaultValue: CurrentConfiguration.default.markdownMarkerVisibility,
+                lineNumber: lineNumber,
+                url: url,
+                context: &context
+            ) {
+                context.configuration.markdownMarkerVisibility = parsed
+            }
         default:
             context.diagnostics.append(CurrentConfigurationDiagnostic(
                 severity: .warning,
@@ -533,6 +569,58 @@ private enum CurrentConfigurationLoader {
             return nil
         }
         return parsed
+    }
+
+    private static func parsedBool(
+        _ value: String,
+        key: String,
+        defaultValue: Bool,
+        lineNumber: Int,
+        url: URL,
+        context: inout LoadingContext
+    ) -> Bool? {
+        guard !value.isEmpty else {
+            return defaultValue
+        }
+
+        switch value.lowercased() {
+        case "true", "yes", "on", "1":
+            return true
+        case "false", "no", "off", "0":
+            return false
+        default:
+            context.diagnostics.append(CurrentConfigurationDiagnostic(
+                severity: .warning,
+                message: "Ignored invalid value for \(key): \(value).",
+                url: url,
+                line: lineNumber
+            ))
+            return nil
+        }
+    }
+
+    private static func parsedMarkdownMarkerVisibility(
+        _ value: String,
+        key: String,
+        defaultValue: MarkdownMarkerVisibility,
+        lineNumber: Int,
+        url: URL,
+        context: inout LoadingContext
+    ) -> MarkdownMarkerVisibility? {
+        guard !value.isEmpty else {
+            return defaultValue
+        }
+
+        guard let visibility = MarkdownMarkerVisibility(rawValue: value.lowercased()) else {
+            context.diagnostics.append(CurrentConfigurationDiagnostic(
+                severity: .warning,
+                message: "Ignored invalid value for \(key): \(value).",
+                url: url,
+                line: lineNumber
+            ))
+            return nil
+        }
+        return visibility
     }
 
     private static func parseInclude(_ rawValue: String, line: Int) -> ConfigInclude {

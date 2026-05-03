@@ -58,6 +58,7 @@ public struct ContentView: View {
             activeDayID: controller.activeDayID,
             searchQuery: controller.searchQuery,
             configuration: configurationStore.configuration,
+            canLoadOlderDays: controller.canLoadOlderDays,
             topSpacerHeight: controller.topSpacerHeight,
             bottomSpacerHeight: controller.bottomSpacerHeight,
             scrollRequest: controller.scrollRequest,

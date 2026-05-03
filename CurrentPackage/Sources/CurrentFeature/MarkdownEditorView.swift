@@ -20,9 +20,19 @@ final class MarkdownTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if let edit = inlineFormattingEdit(for: event, modifiers: modifiers),
+           apply(edit) {
+            return
+        }
+
         switch event.keyCode {
         case 51 where modifiers.isEmpty:
             if apply(MarkdownBlockEditing.headingBackspaceEdit(in: string, selectedRange: selectedRange())) {
+                return
+            }
+        case 36 where modifiers == .command,
+             76 where modifiers == .command:
+            if apply(MarkdownListEditing.taskToggleEdit(in: string, selectedRange: selectedRange())) {
                 return
             }
         case 36 where modifiers.isEmpty,
@@ -57,6 +67,35 @@ final class MarkdownTextView: NSTextView {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mm a"
         editor.insertText("[\(formatter.string(from: Date()))] ", replacementRange: editor.selectedRange())
+    }
+
+    private func inlineFormattingEdit(
+        for event: NSEvent,
+        modifiers: NSEvent.ModifierFlags
+    ) -> MarkdownListEditing.TextEdit? {
+        guard let key = event.charactersIgnoringModifiers?.lowercased() else { return nil }
+        let selection = selectedRange()
+
+        switch (key, modifiers) {
+        case ("b", .command):
+            return MarkdownInlineFormatting.formattingEdit(kind: .bold, in: string, selectedRange: selection)
+        case ("i", .command):
+            return MarkdownInlineFormatting.formattingEdit(kind: .italic, in: string, selectedRange: selection)
+        case ("u", .command):
+            return MarkdownInlineFormatting.formattingEdit(kind: .underline, in: string, selectedRange: selection)
+        case ("s", [.command, .shift]):
+            return MarkdownInlineFormatting.formattingEdit(kind: .strikethrough, in: string, selectedRange: selection)
+        case ("e", .command):
+            return MarkdownInlineFormatting.formattingEdit(kind: .inlineCode, in: string, selectedRange: selection)
+        case ("k", .command):
+            return MarkdownInlineFormatting.linkEdit(
+                in: string,
+                selectedRange: selection,
+                urlString: NSPasteboard.general.string(forType: .string) ?? ""
+            )
+        default:
+            return nil
+        }
     }
 
     private func apply(_ edit: MarkdownListEditing.TextEdit?) -> Bool {
