@@ -35,7 +35,7 @@ cask "current" do
 
   url "https://github.com/iamrajjoshi/current/releases/download/v#{version}/Current-#{version}.zip"
   name "Current"
-  desc "Native macOS apps for daily notes in a single stream"
+  desc "Daily notes in a single stream"
   homepage "https://github.com/iamrajjoshi/current"
 
   depends_on macos: ">= :sonoma"
