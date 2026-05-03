@@ -110,4 +110,5 @@ jobs:
         run: |
           brew tap iamrajjoshi/tap
           brew update
-          brew style --cask iamrajjoshi/tap/current
+          brew info --cask iamrajjoshi/tap/current
+          brew fetch --cask --force iamrajjoshi/tap/current

@@ -44,15 +44,6 @@ cask "current" do
 end
 EOF
 
-if command -v brew >/dev/null 2>&1; then
-  if ! (
-    cd "$TEMP_DIR"
-    brew style --cask Casks/current.rb
-  ); then
-    echo "Skipping brew style in temporary clone; workflow validates the pushed tap cask"
-  fi
-fi
-
 git -C "$TEMP_DIR" add Casks/current.rb
 git -C "$TEMP_DIR" diff --cached -- Casks/current.rb
 
