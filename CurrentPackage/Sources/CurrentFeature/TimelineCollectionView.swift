@@ -5,6 +5,7 @@ struct TimelineCollectionView: NSViewRepresentable {
     var days: [DayDocument]
     var today: Date
     var activeDayID: String?
+    var minimizedDayIDs: Set<String>
     var searchQuery: String
     var configuration: CurrentConfiguration
     var canLoadOlderDays: Bool
@@ -13,6 +14,7 @@ struct TimelineCollectionView: NSViewRepresentable {
     var scrollRequest: TimelineScrollRequest?
     var onFocus: (Date) -> Void
     var onChange: (Date, String) -> Void
+    var onToggleMinimized: (Date) -> Void
     var onLoadOlder: () -> Void
     var onLoadNewer: () -> Void
 
@@ -93,9 +95,14 @@ public enum TimelineRowHeightCalculator {
         for document: DayDocument,
         isToday: Bool,
         isActive: Bool = false,
+        isMinimized: Bool = false,
         width: CGFloat = 700,
         configuration: CurrentConfiguration = .default
     ) -> CGFloat {
+        if isMinimized && !isToday {
+            return collapsedEmptyDayHeight
+        }
+
         let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard isToday || isActive || hasText else {
             return collapsedEmptyDayHeight
@@ -153,6 +160,21 @@ public enum TimelineRowHeightCalculator {
             minimumHeight,
             ceil(used.height + CurrentTheme.editorVerticalInset * 2 + 6)
         )
+    }
+}
+
+enum TimelineDayPresentation {
+    static func isEffectivelyMinimized(
+        document: DayDocument,
+        isToday: Bool,
+        minimizedDayIDs: Set<String>,
+        searchQuery: String
+    ) -> Bool {
+        guard !isToday, minimizedDayIDs.contains(document.id) else { return false }
+
+        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        return !document.text.localizedStandardContains(query)
     }
 }
 
@@ -236,6 +258,7 @@ extension TimelineCollectionView {
         private var lastRequestedOlderBoundaryID: String?
         private var lastRequestedNewerBoundaryID: String?
         private var lastViewportWidth: CGFloat = 0
+        private var pendingMinimizedToggleAnchor: ScrollAnchor?
 
         init(_ parent: TimelineCollectionView) {
             self.parent = parent
@@ -274,6 +297,7 @@ extension TimelineCollectionView {
                 || abs(nextParent.bottomSpacerHeight - parent.bottomSpacerHeight) > 0.5
             let searchChanged = nextParent.searchQuery != lastSearchQuery
             let activeDayChanged = nextParent.activeDayID != parent.activeDayID
+            let minimizedChanged = nextParent.minimizedDayIDs != parent.minimizedDayIDs
             let configurationChanged = nextParent.configuration != parent.configuration
             let todayChanged = nextParent.today != parent.today
             let activeOnlyChanged = activeDayChanged
@@ -281,11 +305,19 @@ extension TimelineCollectionView {
                 && !contentChanged
                 && !spacerChanged
                 && !searchChanged
+                && !minimizedChanged
                 && !configurationChanged
                 && !todayChanged
-            let anchor = structureChanged || spacerChanged ? captureFirstVisibleDayAnchor() : nil
+            let layoutStateChanged = minimizedChanged || searchChanged
+            let preferredAnchor = minimizedChanged ? pendingMinimizedToggleAnchor : nil
+            let anchor = structureChanged || spacerChanged || layoutStateChanged
+                ? preferredAnchor ?? captureFirstVisibleDayAnchor()
+                : nil
             let previousActiveDayID = parent.activeDayID
             let nextActiveDayID = nextParent.activeDayID
+            if minimizedChanged {
+                pendingMinimizedToggleAnchor = nil
+            }
 
             parent = nextParent
             isApplyingSnapshot = true
@@ -299,6 +331,14 @@ extension TimelineCollectionView {
                     collectionView.collectionViewLayout?.invalidateLayout()
                     collectionView.layoutSubtreeIfNeeded()
                 }
+                syncCollectionViewFrame()
+                if let anchor {
+                    restore(anchor)
+                }
+            } else if layoutStateChanged {
+                reconfigureVisibleDayItems()
+                collectionView.collectionViewLayout?.invalidateLayout()
+                collectionView.layoutSubtreeIfNeeded()
                 syncCollectionViewFrame()
                 if let anchor {
                     restore(anchor)
@@ -354,10 +394,14 @@ extension TimelineCollectionView {
                     document: document,
                     isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
                     isActive: document.id == parent.activeDayID,
+                    isMinimized: effectiveIsMinimized(document),
                     searchQuery: parent.searchQuery,
                     configuration: parent.configuration,
                     onFocus: parent.onFocus,
-                    onChange: parent.onChange
+                    onChange: parent.onChange,
+                    onToggleMinimized: { [weak self] date, dayID in
+                        self?.toggleMinimized(for: date, dayID: dayID)
+                    }
                 )
                 return dayItem
             }
@@ -377,6 +421,7 @@ extension TimelineCollectionView {
                     for: document,
                     isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
                     isActive: document.id == parent.activeDayID,
+                    isMinimized: effectiveIsMinimized(document),
                     width: width,
                     configuration: parent.configuration
                 )
@@ -605,10 +650,14 @@ extension TimelineCollectionView {
                     document: document,
                     isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
                     isActive: document.id == parent.activeDayID,
+                    isMinimized: effectiveIsMinimized(document),
                     searchQuery: parent.searchQuery,
                     configuration: parent.configuration,
                     onFocus: parent.onFocus,
-                    onChange: parent.onChange
+                    onChange: parent.onChange,
+                    onToggleMinimized: { [weak self] date, dayID in
+                        self?.toggleMinimized(for: date, dayID: dayID)
+                    }
                 )
             }
         }
@@ -622,6 +671,32 @@ extension TimelineCollectionView {
                     let isToday = Calendar.current.isDate(document.date, inSameDayAs: parent.today)
                     return !hasText && !isToday
                 }
+        }
+
+        private func toggleMinimized(for date: Date, dayID: String) {
+            pendingMinimizedToggleAnchor = captureAnchor(forDayID: dayID)
+            parent.onToggleMinimized(date)
+        }
+
+        private func effectiveIsMinimized(_ document: DayDocument) -> Bool {
+            TimelineDayPresentation.isEffectivelyMinimized(
+                document: document,
+                isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
+                minimizedDayIDs: parent.minimizedDayIDs,
+                searchQuery: parent.searchQuery
+            )
+        }
+
+        private func captureAnchor(forDayID dayID: String) -> ScrollAnchor? {
+            guard let collectionView,
+                  let scrollView,
+                  let indexPath = indexPath(forDayID: dayID),
+                  let attributes = collectionView.layoutAttributesForItem(at: indexPath) else { return nil }
+
+            return ScrollAnchor(
+                dayID: dayID,
+                offsetFromVisibleTop: scrollView.contentView.bounds.minY - attributes.frame.minY
+            )
         }
 
         private func indexPath(forDayID dayID: String) -> IndexPath? {
@@ -690,10 +765,12 @@ final class TimelineDayCollectionItem: NSCollectionViewItem {
         document: DayDocument,
         isToday: Bool,
         isActive: Bool,
+        isMinimized: Bool,
         searchQuery: String,
         configuration: CurrentConfiguration,
         onFocus: @escaping (Date) -> Void,
-        onChange: @escaping (Date, String) -> Void
+        onChange: @escaping (Date, String) -> Void,
+        onToggleMinimized: @escaping (Date, String) -> Void
     ) {
         if representedDayID != document.id {
             representedDayID = document.id
@@ -708,16 +785,21 @@ final class TimelineDayCollectionItem: NSCollectionViewItem {
         let change = { text in
             onChange(document.date, text)
         }
+        let toggleMinimized = {
+            onToggleMinimized(document.date, document.id)
+        }
 
         if let model {
             model.update(
                 document: document,
                 isToday: isToday,
                 isActive: isActive,
+                isMinimized: isMinimized,
                 searchQuery: searchQuery,
                 configuration: configuration,
                 onFocus: focus,
-                onChange: change
+                onChange: change,
+                onToggleMinimized: toggleMinimized
             )
             return
         }
@@ -726,10 +808,12 @@ final class TimelineDayCollectionItem: NSCollectionViewItem {
             document: document,
             isToday: isToday,
             isActive: isActive,
+            isMinimized: isMinimized,
             searchQuery: searchQuery,
             configuration: configuration,
             onFocus: focus,
-            onChange: change
+            onChange: change,
+            onToggleMinimized: toggleMinimized
         )
         let rootView = DaySectionView(model: model)
 

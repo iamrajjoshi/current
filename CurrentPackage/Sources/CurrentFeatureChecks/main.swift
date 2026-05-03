@@ -23,8 +23,12 @@ struct CurrentFeatureChecks {
         try loadNewerWindowRestoresTrimmedTopHistory()
         try loadNewerWindowReloadsCleanTrimmedDocuments()
         try dirtyOffWindowDocumentsStayCachedAndSave()
+        try timelineControllerTogglesHistoricalDayMinimization()
+        try timelineControllerIgnoresTodayMinimization()
         try rowHeightCalculatorKeepsEmptyCollapsedRowsStable()
         try rowHeightCalculatorExpandsActiveEmptyRows()
+        try rowHeightCalculatorCollapsesMinimizedHistoricalTextRows()
+        try rowHeightCalculatorKeepsTodayExpandedWhenMinimized()
         try rowHeightCalculatorUsesLargeMinimumForEmptyToday()
         try rowHeightCalculatorGrowsForMultilineText()
         try timelineLayoutMetricsCenterTheWritingColumn()
@@ -612,6 +616,65 @@ struct CurrentFeatureChecks {
         try check(controller.cache[now]?.isDirty == false, "Saved off-window document should be clean")
     }
 
+    @MainActor
+    static func timelineControllerTogglesHistoricalDayMinimization() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let yesterday = calendar.addingDays(-1, to: now)
+        let store = try storeWithDefaultStreamCreatedAt(yesterday, root: root, calendar: calendar)
+        let stream = try store.defaultStream()
+        try writeDay(yesterday, text: "Yesterday notes", stream: stream, store: store)
+        let controller = TimelineController(
+            store: store,
+            cache: DayCache(calendar: calendar),
+            recentDayCount: 2,
+            now: now
+        )
+
+        controller.bootstrapIfNeeded(now: now)
+        controller.setActiveDate(yesterday)
+
+        try check(controller.activeDayID == "2026-04-28", "Historical day should become active before minimizing")
+
+        controller.toggleDayMinimized(yesterday)
+
+        try check(controller.isDayMinimized(yesterday), "Historical text day should be minimized")
+        try check(controller.minimizedDayIDs == Set(["2026-04-28"]), "Minimized day IDs should contain the historical day")
+        try check(controller.activeDayID == nil, "Minimized active day should stop being treated as active")
+
+        controller.toggleDayMinimized(yesterday)
+
+        try check(!controller.isDayMinimized(yesterday), "Second toggle should expand the historical day")
+        try check(controller.activeDayID == nil, "Expanding a minimized day should not make it active")
+
+        controller.toggleDayMinimized(yesterday)
+        controller.apply(configuration: CurrentConfiguration(
+            libraryRoot: try temporaryDirectory().appendingPathComponent("new-current", isDirectory: true),
+            recentDays: 1
+        ))
+
+        try check(controller.minimizedDayIDs.isEmpty, "Changing stream storage should clear session-only minimized state")
+    }
+
+    @MainActor
+    static func timelineControllerIgnoresTodayMinimization() throws {
+        let root = try temporaryRoot()
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let controller = TimelineController(
+            store: StreamStore(libraryRoot: root, calendar: calendar),
+            cache: DayCache(calendar: calendar),
+            now: now
+        )
+
+        controller.bootstrapIfNeeded(now: now)
+        controller.toggleDayMinimized(now)
+
+        try check(controller.minimizedDayIDs.isEmpty, "Today should not be minimizable")
+        try check(!controller.isDayMinimized(now), "Today should never report as minimized")
+    }
+
     static func rowHeightCalculatorKeepsEmptyCollapsedRowsStable() throws {
         let calendar = fixedCalendar()
         let date = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 28)))
@@ -631,6 +694,33 @@ struct CurrentFeatureChecks {
         let activeHeight = TimelineRowHeightCalculator.height(for: document, isToday: false, isActive: true, width: 700)
 
         try check(activeHeight > collapsedHeight, "Active empty rows should reserve editor height instead of overlapping following dates")
+    }
+
+    static func rowHeightCalculatorCollapsesMinimizedHistoricalTextRows() throws {
+        let calendar = fixedCalendar()
+        let date = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 28)))
+        let document = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/text.md"), text: "Notes from yesterday")
+
+        let expandedHeight = TimelineRowHeightCalculator.height(for: document, isToday: false, width: 700)
+        let minimizedHeight = TimelineRowHeightCalculator.height(for: document, isToday: false, isMinimized: true, width: 700)
+
+        try check(expandedHeight > TimelineRowHeightCalculator.collapsedEmptyDayHeight, "Text rows should normally expand")
+        try check(
+            minimizedHeight == TimelineRowHeightCalculator.collapsedEmptyDayHeight,
+            "Minimized historical text rows should use collapsed height"
+        )
+    }
+
+    static func rowHeightCalculatorKeepsTodayExpandedWhenMinimized() throws {
+        let calendar = fixedCalendar()
+        let date = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29)))
+        let document = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today-text.md"), text: "Today notes")
+
+        let expandedHeight = TimelineRowHeightCalculator.height(for: document, isToday: true, width: 700)
+        let minimizedHeight = TimelineRowHeightCalculator.height(for: document, isToday: true, isMinimized: true, width: 700)
+
+        try check(minimizedHeight == expandedHeight, "Today should ignore minimized row-height state")
+        try check(minimizedHeight > TimelineRowHeightCalculator.collapsedEmptyDayHeight, "Today should remain expanded")
     }
 
     static func rowHeightCalculatorUsesLargeMinimumForEmptyToday() throws {

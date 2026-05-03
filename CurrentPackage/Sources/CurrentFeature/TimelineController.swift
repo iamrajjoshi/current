@@ -146,6 +146,7 @@ public final class TimelineController: ObservableObject {
     @Published public private(set) var canLoadOlderDays = true
     @Published public private(set) var topSpacerHeight: CGFloat = 0
     @Published public private(set) var bottomSpacerHeight: CGFloat = 0
+    @Published public private(set) var minimizedDayIDs: Set<String> = []
     @Published public var searchQuery = ""
     @Published public var notice: TimelineNotice?
 
@@ -288,12 +289,41 @@ public final class TimelineController: ObservableObject {
         activeDate = key
     }
 
+    public func isDayMinimized(_ date: Date) -> Bool {
+        let key = calendar.startOfDay(for: date)
+        guard !calendar.isDate(key, inSameDayAs: today) else { return false }
+        return minimizedDayIDs.contains(DayFormatting.dayKey(for: key, calendar: calendar))
+    }
+
+    public func toggleDayMinimized(_ date: Date) {
+        let key = calendar.startOfDay(for: date)
+        guard !calendar.isDate(key, inSameDayAs: today),
+              let document = cache[key],
+              !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let dayID = DayFormatting.dayKey(for: key, calendar: calendar)
+        var nextMinimizedDayIDs = minimizedDayIDs
+        if nextMinimizedDayIDs.contains(dayID) {
+            nextMinimizedDayIDs.remove(dayID)
+            minimizedDayIDs = nextMinimizedDayIDs
+        } else {
+            nextMinimizedDayIDs.insert(dayID)
+            minimizedDayIDs = nextMinimizedDayIDs
+            if activeDate == key {
+                activeDate = nil
+            }
+        }
+    }
+
     public var activeDocument: DayDocument? {
         cache[activeDate ?? today] ?? cache[today]
     }
 
     public var activeDayID: String? {
-        activeDate.map { DayFormatting.dayKey(for: $0, calendar: calendar) }
+        guard let activeDate else { return nil }
+        let dayID = DayFormatting.dayKey(for: activeDate, calendar: calendar)
+        guard !minimizedDayIDs.contains(dayID) else { return nil }
+        return dayID
     }
 
     public func save(_ date: Date) {
@@ -491,6 +521,7 @@ public final class TimelineController: ObservableObject {
             for: document,
             isToday: calendar.isDate(document.date, inSameDayAs: today),
             isActive: activeDate.map { calendar.isDate($0, inSameDayAs: document.date) } ?? false,
+            isMinimized: isDayMinimized(document.date),
             width: CurrentTheme.contentMaxWidth(configuration: configuration),
             configuration: configuration
         )
@@ -514,6 +545,7 @@ public final class TimelineController: ObservableObject {
         stream = nil
         days = []
         activeDate = nil
+        minimizedDayIDs = []
         scrollRequest = nil
         canLoadOlderDays = true
         topSpacerHeight = 0
