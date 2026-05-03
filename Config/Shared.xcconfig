@@ -27,6 +27,8 @@ ALWAYS_USE_SEPARATE_HEADERMAPS = YES
 // Info PLIST
 // ==========================================
 GENERATE_INFOPLIST_FILE = YES
+ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon
+ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor
 
 // ==========================================
 // Entitlements
