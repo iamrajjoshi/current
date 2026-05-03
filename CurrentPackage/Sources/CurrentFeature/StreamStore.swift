@@ -34,7 +34,7 @@ public final class StreamStore {
         let metadataURL = streamRoot.appendingPathComponent(metadataFilename)
         if fileManager.fileExists(atPath: metadataURL.path),
            let data = try? Data(contentsOf: metadataURL),
-           let stream = try? JSONDecoder().decode(Stream.self, from: data) {
+           let stream = try? metadataDecoder.decode(Stream.self, from: data) {
             return stream
         }
 
@@ -49,6 +49,10 @@ public final class StreamStore {
             .appendingPathComponent(DayFormatting.yearFolder(for: normalized, calendar: calendar), isDirectory: true)
             .appendingPathComponent(DayFormatting.monthFolder(for: normalized, calendar: calendar), isDirectory: true)
             .appendingPathComponent("\(DayFormatting.dayKey(for: normalized, calendar: calendar)).md")
+    }
+
+    public func dayFileExists(for date: Date, in stream: Stream) -> Bool {
+        fileManager.fileExists(atPath: dayURL(for: date, in: stream).path)
     }
 
     public func existingDayDates(
@@ -200,5 +204,11 @@ public final class StreamStore {
 
     private func modificationDate(for url: URL) -> Date? {
         (try? fileManager.attributesOfItem(atPath: url.path)[.modificationDate]) as? Date
+    }
+
+    private var metadataDecoder: JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
     }
 }

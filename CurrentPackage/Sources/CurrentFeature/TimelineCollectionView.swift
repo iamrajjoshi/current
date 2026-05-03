@@ -7,6 +7,7 @@ struct TimelineCollectionView: NSViewRepresentable {
     var activeDayID: String?
     var searchQuery: String
     var configuration: CurrentConfiguration
+    var canLoadOlderDays: Bool
     var topSpacerHeight: CGFloat
     var bottomSpacerHeight: CGFloat
     var scrollRequest: TimelineScrollRequest?
@@ -471,7 +472,8 @@ extension TimelineCollectionView {
             let contentHeight = max(collectionView.collectionViewLayout?.collectionViewContentSize.height ?? collectionView.bounds.height, collectionView.bounds.height)
             let distanceToBottom = contentHeight - visibleRect.maxY
 
-            if distanceToBottom < CurrentTheme.historyPreloadDistance,
+            if parent.canLoadOlderDays,
+               distanceToBottom < CurrentTheme.historyPreloadDistance,
                let oldestID = parent.days.last?.id,
                oldestID != lastRequestedOlderBoundaryID,
                !isLoadingOlder {

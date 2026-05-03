@@ -10,6 +10,9 @@ public enum MarkdownListEditing {
     private static let listLineRegex = try! NSRegularExpression(
         pattern: #"^([ \t]*)(?:(\d+)\.|([-*+]))[ \t]+(?:(\[[ xX]\])[ \t]+)?(.*)$"#
     )
+    private static let taskLineRegex = try! NSRegularExpression(
+        pattern: #"^([ \t]*(?:(?:\d+\.)|[-*+])[ \t]+)\[([ xX])\]"#
+    )
 
     public static func continuationEdit(in text: String, selectedRange: NSRange) -> TextEdit? {
         guard selectedRange.length == 0 else { return nil }
@@ -85,6 +88,30 @@ public enum MarkdownListEditing {
             range: affectedRange,
             replacement: rewritten,
             selectedRangeAfterEdit: NSRange(location: selectionLocation, length: max(0, selectedRange.length + delta))
+        )
+    }
+
+    public static func taskToggleEdit(in text: String, selectedRange: NSRange) -> TextEdit? {
+        guard selectedRange.length == 0 else { return nil }
+        let nsText = text as NSString
+        guard selectedRange.location <= nsText.length else { return nil }
+        guard !isInsideFencedCodeBlock(nsText, location: selectedRange.location) else { return nil }
+
+        let lineRange = nsText.lineRange(for: NSRange(location: selectedRange.location, length: 0))
+        let lineBodyRange = lineBodyRange(from: lineRange, in: nsText)
+        let line = nsText.substring(with: lineBodyRange)
+        let lineNS = line as NSString
+        let range = NSRange(location: 0, length: lineNS.length)
+        guard let match = taskLineRegex.firstMatch(in: line, range: range) else { return nil }
+
+        let stateRange = match.range(at: 2)
+        guard stateRange.location != NSNotFound else { return nil }
+        let currentState = lineNS.substring(with: stateRange)
+        let replacement = currentState == " " ? "x" : " "
+        return TextEdit(
+            range: NSRange(location: lineBodyRange.location + stateRange.location, length: stateRange.length),
+            replacement: replacement,
+            selectedRangeAfterEdit: selectedRange
         )
     }
 

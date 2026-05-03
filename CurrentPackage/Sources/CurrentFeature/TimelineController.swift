@@ -67,6 +67,10 @@ public struct TimelineWindowState: Equatable {
         bottomSpacerHeight = 0
     }
 
+    mutating func replaceDatesPreservingSpacers(_ dates: [Date]) {
+        self.dates = dates
+    }
+
     mutating func clearTopSpacer() {
         topSpacerHeight = 0
     }
@@ -222,15 +226,17 @@ public final class TimelineController: ObservableObject {
         guard let stream else { return false }
         guard let oldest = windowState.dates.last else { return false }
 
-        let olderDates = nextOlderDates(before: oldest)
-        guard !olderDates.isEmpty else { return false }
+        let olderDates = nextOlderDates(before: oldest, in: stream)
+        guard !olderDates.isEmpty else {
+            canLoadOlderDays = false
+            return false
+        }
 
-        loadDocuments(for: olderDates, in: stream, createToday: false)
         windowState.appendOlderDates(olderDates) { [weak self] date in
             self?.spacerHeight(for: date) ?? self?.estimatedCollapsedDayHeight ?? TimelineRowHeightCalculator.collapsedEmptyDayHeight
         }
         publishDays()
-        canLoadOlderDays = true
+        canLoadOlderDays = hasOlderDates(before: windowState.dates.last, in: stream)
         return true
     }
 
@@ -241,14 +247,13 @@ public final class TimelineController: ObservableObject {
         guard topSpacerHeight > 0 || windowState.topSpacerHeight > 0 else { return false }
         guard let newest = windowState.dates.first else { return false }
 
-        let newerDates = nextNewerDates(after: newest)
+        let newerDates = nextNewerDates(after: newest, in: stream)
         guard !newerDates.isEmpty else {
             windowState.clearTopSpacer()
             publishDays()
             return false
         }
 
-        loadDocuments(for: newerDates, in: stream, createToday: true)
         windowState.prependNewerDates(newerDates) { [weak self] date in
             self?.spacerHeight(for: date) ?? self?.estimatedCollapsedDayHeight ?? TimelineRowHeightCalculator.collapsedEmptyDayHeight
         }
@@ -352,10 +357,12 @@ public final class TimelineController: ObservableObject {
 
     public func jumpToToday() {
         syncWindowConfiguration()
-        windowState.reset(to: recentDates(endingAt: today))
-
         if let stream {
-            loadDocuments(for: windowState.dates, in: stream, createToday: true)
+            windowState.reset(to: recentDates(endingAt: today, in: stream))
+            canLoadOlderDays = hasOlderDates(before: windowState.dates.last, in: stream)
+        } else {
+            windowState.reset(to: [])
+            canLoadOlderDays = false
         }
 
         publishDays()
@@ -393,38 +400,52 @@ public final class TimelineController: ObservableObject {
         scrollRequest = .searchMatch(id)
     }
 
-    private func loadDocuments(for dates: [Date], in stream: Stream, createToday: Bool) {
-        for date in dates {
-            do {
-                cache.insert(try store.loadDay(
-                    date,
-                    in: stream,
-                    createIfMissing: createToday && calendar.isDate(date, inSameDayAs: today)
-                ))
-            } catch {
-                notice = TimelineNotice(
-                    kind: .saveError,
-                    title: "Could not load history",
-                    message: error.localizedDescription
-                )
-            }
+    private func loadDocument(
+        for date: Date,
+        in stream: Stream,
+        createToday: Bool
+    ) -> DayDocument? {
+        do {
+            let document = try store.loadDay(
+                date,
+                in: stream,
+                createIfMissing: createToday && calendar.isDate(date, inSameDayAs: today)
+            )
+            cache.insert(document)
+            return document
+        } catch {
+            notice = TimelineNotice(
+                kind: .saveError,
+                title: "Could not load history",
+                message: error.localizedDescription
+            )
+            return nil
         }
     }
 
-    private func nextOlderDates(before oldest: Date) -> [Date] {
+    private func nextOlderDates(before oldest: Date, in stream: Stream) -> [Date] {
         syncWindowConfiguration()
         var olderDates: [Date] = []
+        let start = blankHistoryStartDate(for: stream)
         var cursor = calendar.addingDays(-1, to: oldest)
 
-        while olderDates.count < windowState.batchSize {
-            olderDates.append(cursor)
+        while olderDates.count < windowState.batchSize, cursor >= start {
+            if let document = loadDocument(for: cursor, in: stream, createToday: false),
+               shouldDisplay(document: document, in: stream) {
+                olderDates.append(document.date)
+            }
             cursor = calendar.addingDays(-1, to: cursor)
+        }
+
+        if olderDates.count < windowState.batchSize {
+            let cutoff = oldest <= start ? oldest : start
+            olderDates.append(contentsOf: existingDates(before: cutoff, in: stream, limit: windowState.batchSize - olderDates.count))
         }
 
         return olderDates
     }
 
-    private func nextNewerDates(after newest: Date) -> [Date] {
+    private func nextNewerDates(after newest: Date, in stream: Stream) -> [Date] {
         syncWindowConfiguration()
         guard newest < today else { return [] }
 
@@ -432,17 +453,35 @@ public final class TimelineController: ObservableObject {
         var cursor = calendar.addingDays(1, to: newest)
 
         while cursor <= today, newerDatesAscending.count < windowState.batchSize {
-            newerDatesAscending.append(cursor)
+            if let document = loadDocument(for: cursor, in: stream, createToday: true),
+               shouldDisplay(document: document, in: stream) {
+                newerDatesAscending.append(document.date)
+            }
             cursor = calendar.addingDays(1, to: cursor)
         }
 
         return newerDatesAscending.reversed()
     }
 
-    private func recentDates(endingAt newest: Date) -> [Date] {
+    private func recentDates(endingAt newest: Date, in stream: Stream) -> [Date] {
         let count = max(1, recentDayCount)
-        return (0..<count)
-            .map { calendar.addingDays(-$0, to: newest) }
+        let start = blankHistoryStartDate(for: stream)
+        var dates: [Date] = []
+        var cursor = calendar.startOfDay(for: newest)
+
+        while dates.count < count, cursor >= start {
+            if let document = loadDocument(for: cursor, in: stream, createToday: true),
+               shouldDisplay(document: document, in: stream) {
+                dates.append(document.date)
+            }
+            cursor = calendar.addingDays(-1, to: cursor)
+        }
+
+        if dates.count < count {
+            dates.append(contentsOf: existingDates(before: start, in: stream, limit: count - dates.count))
+        }
+
+        return dates
     }
 
     private func spacerHeight(for date: Date) -> CGFloat {
@@ -465,13 +504,59 @@ public final class TimelineController: ObservableObject {
 
     private func publishDays() {
         syncWindowConfiguration()
+        if let stream {
+            let visibleDates = windowState.dates.filter { date in
+                guard let document = cache[date] else { return false }
+                return shouldDisplay(document: document, in: stream)
+            }
+            if visibleDates != windowState.dates {
+                windowState.replaceDatesPreservingSpacers(visibleDates)
+            }
+        }
         topSpacerHeight = windowState.topSpacerHeight
         bottomSpacerHeight = windowState.bottomSpacerHeight
-        canLoadOlderDays = true
 
         let visibleSet = Set(windowState.dates)
         _ = cache.evictCleanDocuments(keeping: visibleSet, today: today)
         days = windowState.dates.compactMap { cache[$0] }
+    }
+
+    private func blankHistoryStartDate(for stream: Stream) -> Date {
+        min(calendar.startOfDay(for: stream.createdAt), today)
+    }
+
+    private func existingDates(before date: Date, in stream: Stream, limit: Int) -> [Date] {
+        let visibleDates = Set(windowState.dates)
+        return store.existingDayDates(in: stream, before: date, limit: max(limit + visibleDates.count, limit))
+            .filter { !visibleDates.contains($0) }
+            .prefix(limit)
+            .compactMap { date in
+                loadDocument(for: date, in: stream, createToday: false)?.date
+            }
+    }
+
+    private func hasOlderDates(before date: Date?, in stream: Stream) -> Bool {
+        guard let date else { return false }
+        return !nextOlderDates(before: date, in: stream).isEmpty
+    }
+
+    private func shouldDisplay(document: DayDocument, in stream: Stream) -> Bool {
+        if calendar.isDate(document.date, inSameDayAs: today) {
+            return true
+        }
+
+        if document.date < blankHistoryStartDate(for: stream) {
+            return store.dayFileExists(for: document.date, in: stream)
+        }
+
+        if configuration.hideEmptyWeekends,
+           calendar.isDateInWeekend(document.date),
+           document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           !document.isDirty {
+            return false
+        }
+
+        return true
     }
 
     private func scheduleAutosave(for date: Date) {
