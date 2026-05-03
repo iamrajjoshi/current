@@ -1,0 +1,113 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, for example 0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+
+    env:
+      APP_NAME: Current
+      DERIVED_DATA_PATH: ${{ runner.temp }}/CurrentDerivedData
+      DIST_DIR: ${{ github.workspace }}/dist
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install XcodeBuildMCP
+        run: npm install --global xcodebuildmcp@2.3.2
+
+      - name: Check Homebrew tap token
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [[ -z "$HOMEBREW_TAP_TOKEN" ]]; then
+            echo "HOMEBREW_TAP_TOKEN must be set before releasing"
+            exit 1
+          fi
+
+      - name: Validate version input
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Version must look like 0.1.0, 1.2, or 1.2.3-beta.1"
+            exit 1
+          fi
+
+      - name: Run Swift package tests
+        run: xcodebuildmcp swift-package test --package-path CurrentPackage
+
+      - name: Run feature checks
+        run: xcodebuildmcp swift-package run --package-path CurrentPackage --executable-name CurrentFeatureChecks
+
+      - name: Build Release app
+        run: |
+          xcodebuildmcp macos build \
+            --workspace-path Current.xcworkspace \
+            --scheme Current \
+            --configuration Release \
+            --derived-data-path "$DERIVED_DATA_PATH" \
+            --extra-args "MARKETING_VERSION=${{ inputs.version }}" \
+            --extra-args "CURRENT_PROJECT_VERSION=${GITHUB_RUN_NUMBER}" \
+            --extra-args "ONLY_ACTIVE_ARCH=NO"
+
+      - name: Package app
+        run: |
+          VERSION="${{ inputs.version }}"
+          APP_PATH="$DERIVED_DATA_PATH/Build/Products/Release/$APP_NAME.app"
+          ZIP_PATH="$DIST_DIR/$APP_NAME-$VERSION.zip"
+
+          if [[ ! -d "$APP_PATH" ]]; then
+            echo "Expected app not found at $APP_PATH"
+            exit 1
+          fi
+
+          SHORT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP_PATH/Contents/Info.plist")
+          if [[ "$SHORT_VERSION" != "$VERSION" ]]; then
+            echo "Expected CFBundleShortVersionString $VERSION, got $SHORT_VERSION"
+            exit 1
+          fi
+
+          mkdir -p "$DIST_DIR"
+          ditto -c -k --keepParent "$APP_PATH" "$ZIP_PATH"
+          unzip -l "$ZIP_PATH" | grep -q "$APP_NAME.app/Contents/Info.plist"
+          shasum -a 256 "$ZIP_PATH"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ inputs.version }}"
+          TAG="v$VERSION"
+          ZIP_PATH="$DIST_DIR/$APP_NAME-$VERSION.zip"
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 1
+          fi
+
+          gh release create "$TAG" "$ZIP_PATH" \
+            --title "$APP_NAME $VERSION" \
+            --target "$GITHUB_SHA" \
+            --generate-notes
+
+      - name: Update Homebrew cask
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: scripts/update-homebrew-cask.sh "${{ inputs.version }}" "$DIST_DIR/$APP_NAME-${{ inputs.version }}.zip"
+
+      - name: Validate Homebrew cask
+        run: |
+          brew tap iamrajjoshi/tap
+          brew update
+          brew style --cask iamrajjoshi/tap/current
