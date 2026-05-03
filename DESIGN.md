@@ -12,7 +12,7 @@ Current exists for quick capture and continuous review:
 - Keep today's note visually primary.
 - Keep previous days available without making the screen feel busy.
 - Preserve Markdown as plain text, with syntax highlighting as a reading aid.
-- Make files, copying, native find, and timestamps available through quiet native controls.
+- Make files, native find, and timestamps available through quiet native controls.
 - Avoid UI that asks the user to manage layout before they can write.
 
 The app should feel native, focused, warm, and light. Chrome should be useful but easy to forget. Structure should come from spacing, typography, and hairline dividers, not heavy cards or panels.
@@ -177,7 +177,7 @@ Implementation home: `ContentView.body`.
 
 - The default capture surface has no top toolbar.
 - The first visible app content should be whitespace, the current day divider, and the editor.
-- Use native menus and keyboard shortcuts for jump to today, insert timestamp, copying, reveal files, and find.
+- Use native menus and keyboard shortcuts for jump to today, insert timestamp, reveal files, and find.
 - A future stream switcher or expanded search may temporarily occupy the titlebar, but it should not return as permanent chrome in MVP 0.
 
 ### Day Divider
@@ -188,6 +188,7 @@ Implementation home: `DaySectionView.dayDivider`.
 - Today label format remains `TODAY · WED, APR 29` style.
 - Historical labels omit "Today".
 - Divider line uses `softDivider`.
+- The active day divider shows a tiny save-state orb after the date label: muted when saved, soft accent while saving.
 - Button target should span the full divider row.
 - Collapsing/expanding animation should stay quick, around `0.18s`.
 
@@ -203,17 +204,13 @@ Implementation homes: `MarkdownEditorView` and `MarkdownSyntaxHighlighter`.
 - Do not wrap the text view in a card, panel, or bordered surface.
 - Keep syntax highlighting incremental and low-contrast.
 
-### Bottom Bar
+### No Persistent Bottom Bar
 
-Implementation home: `ContentView.bottomBar`.
+Implementation home: `ContentView.body`.
 
-- Height: `34px`.
-- Background: `chromeBackground`, preferably material-backed.
-- Top separator: `softDivider`.
-- Left: empty.
-- Center: word and character count for the active editor section using monospaced digits.
-- Right: copy active day and reveal stream files, icon-only.
-- Keep metadata quiet. It should reassure the user that autosave and file-backed writing are working without becoming prominent.
+- The default capture view does not show a persistent bottom bar.
+- File reveal lives in the Stream menu and keyboard shortcut.
+- Save state belongs to the active day divider, not a separate chrome strip.
 
 ### History Loading
 
@@ -276,7 +273,7 @@ Future roadmap items should extend the design system without turning Current int
 - Light mode feels warm and paper-like, not cold gray.
 - Dark mode feels warm charcoal, not pure black.
 - No top bar appears in the default capture view.
-- The bottom bar is useful but visually quiet.
+- No persistent bottom bar appears in the default capture view.
 - Day dividers are scannable and remain the main timeline structure.
 - Editor text is easier to read than the current 12px baseline.
 - Syntax highlighting clarifies Markdown without becoming colorful or busy.
@@ -300,7 +297,7 @@ Future roadmap items should extend the design system without turning Current int
 This design system currently maps to these implementation areas:
 
 - `CurrentTheme`: semantic tokens, colors, typography, spacing, and editor metrics.
-- `ContentView`: app shell, bottom bar, timeline, day sections, and history loading trigger.
+- `ContentView`: app shell, timeline, day sections, and history loading trigger.
 - `MarkdownEditorView`: AppKit text view behavior, editor background, insets, cursor, height measurement, and focus.
 - `MarkdownSyntaxHighlighter`: Markdown token styling, line height, heading emphasis, list indentation, and inline code treatment.
 

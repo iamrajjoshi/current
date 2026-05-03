@@ -23,6 +23,7 @@ final class MarkdownSyntaxHighlighter {
         let fullRange = NSRange(location: 0, length: textStorage.length)
         guard fullRange.length > 0 else { return }
 
+        clearTemporaryDecorations(textStorage)
         textStorage.beginEditing()
         textStorage.setAttributes(baseAttributes(), range: fullRange)
 
@@ -116,6 +117,18 @@ final class MarkdownSyntaxHighlighter {
         ])
 
         textStorage.endEditing()
+        invalidateDecorationDisplay(textStorage)
+    }
+
+    func clearTemporaryDecorations(_ textStorage: NSTextStorage) {
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+        guard fullRange.length > 0 else { return }
+
+        for layoutManager in textStorage.layoutManagers {
+            temporaryDecorationKeys.forEach {
+                layoutManager.removeTemporaryAttribute($0, forCharacterRange: fullRange)
+            }
+        }
     }
 
     private var syntaxColor: NSColor {
@@ -139,8 +152,31 @@ final class MarkdownSyntaxHighlighter {
             .font: baseFont,
             .foregroundColor: CurrentTheme.primaryTextColor,
             .paragraphStyle: paragraph,
-            .baselineOffset: CurrentTheme.editorBaselineOffset
+            .baselineOffset: CurrentTheme.editorBaselineOffset,
+            .underlineStyle: 0,
+            .underlineColor: CurrentTheme.primaryTextColor,
+            .strikethroughStyle: 0,
+            .backgroundColor: NSColor.clear
         ]
+    }
+
+    private var temporaryDecorationKeys: [NSAttributedString.Key] {
+        [
+            .underlineStyle,
+            .underlineColor,
+            .strikethroughStyle,
+            .backgroundColor,
+            .link
+        ]
+    }
+
+    private func invalidateDecorationDisplay(_ textStorage: NSTextStorage) {
+        let fullRange = NSRange(location: 0, length: textStorage.length)
+        guard fullRange.length > 0 else { return }
+
+        for layoutManager in textStorage.layoutManagers {
+            layoutManager.invalidateDisplay(forCharacterRange: fullRange)
+        }
     }
 
     private func listParagraphStyle(prefix: String) -> NSMutableParagraphStyle {
@@ -263,7 +299,8 @@ final class MarkdownSyntaxHighlighter {
                 .foregroundColor: syntaxColor
             ], range: openRange)
             textStorage.addAttributes([
-                .underlineStyle: NSUnderlineStyle.single.rawValue
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .underlineColor: CurrentTheme.primaryTextColor
             ], range: contentRange)
             textStorage.addAttributes([
                 .foregroundColor: syntaxColor

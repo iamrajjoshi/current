@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 public struct ContentView: View {
@@ -16,10 +17,7 @@ public struct ContentView: View {
 
     public var body: some View {
         ZStack(alignment: .top) {
-            VStack(spacing: 0) {
-                timeline
-                bottomBar
-            }
+            timeline
 
             timelineTopFade
         }
@@ -108,135 +106,22 @@ public struct ContentView: View {
         .allowsHitTesting(false)
     }
 
-    private var bottomBar: some View {
-        ZStack {
-            HStack(spacing: 7) {
-                Text(activeStats)
-                    .font(CurrentTheme.metadata)
-                    .foregroundStyle(CurrentTheme.mutedText)
-                    .monospacedDigit()
-
-                Circle()
-                    .fill(activeDocumentIsDirty ? CurrentTheme.accent.opacity(0.58) : CurrentTheme.mutedText.opacity(0.34))
-                    .frame(width: 5, height: 5)
-                    .help(activeDocumentIsDirty ? "Saving" : "Saved")
-            }
-
-            HStack {
-                Spacer()
-
-                Button {
-                    copy(controller.activeDocument?.text ?? "")
-                } label: {
-                    chromeIcon("doc.on.doc")
-                }
-                .buttonStyle(QuietChromeButtonStyle())
-                .help("Copy Active Day")
-
-                Button {
-                    revealStreamFiles()
-                } label: {
-                    chromeIcon("folder")
-                }
-                .buttonStyle(QuietChromeButtonStyle())
-                .help("Reveal Stream Files")
-            }
-            .padding(.leading, 20)
-            .padding(.trailing, 18)
-        }
-        .foregroundStyle(CurrentTheme.secondaryText)
-        .frame(height: 34)
-        .background(CurrentTheme.chromeBackground)
-        .overlay(alignment: .top) {
-            Rectangle()
-                .fill(CurrentTheme.softDivider)
-                .frame(height: 1)
-        }
-    }
-
-    private var activeStats: String {
-        let document = controller.activeDocument
-        let text = document?.text ?? ""
-        let words = text.split { $0.isWhitespace }.count
-        let characters = text.count
-        return "\(activeDayTitle(for: document)) · \(words) words · \(characters) characters"
-    }
-
-    private var activeDocumentIsDirty: Bool {
-        controller.activeDocument?.isDirty == true
-    }
-
-    private func activeDayTitle(for document: DayDocument?) -> String {
-        guard let document else { return "Today" }
-        if Calendar.current.isDate(document.date, inSameDayAs: controller.today) {
-            return "Today"
-        }
-        return DayFormatting.shortTitle(for: document.date)
-    }
-
     private var displayedDays: [DayDocument] {
         controller.days
     }
-
-    private func chromeIcon(_ systemName: String) -> some View {
-        Image(systemName: systemName)
-            .font(CurrentTheme.iconButton)
-            .symbolRenderingMode(.hierarchical)
-            .frame(width: 24, height: 24)
-            .contentShape(RoundedRectangle(cornerRadius: 6))
-    }
-
-    private func revealStreamFiles() {
-        guard let stream = controller.stream else { return }
-        NSWorkspace.shared.activateFileViewerSelecting([stream.rootURL])
-    }
-
-    private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
-    }
-
 }
 
-private struct QuietChromeButtonStyle: ButtonStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        QuietChromeButton(configuration: configuration)
-    }
+@MainActor
+final class DaySectionModel: @preconcurrency ObservableObject {
+    let objectWillChange = ObservableObjectPublisher()
 
-    private struct QuietChromeButton: View {
-        let configuration: ButtonStyle.Configuration
-        @State private var isHovered = false
-
-        var body: some View {
-            configuration.label
-                .foregroundStyle(configuration.isPressed ? CurrentTheme.primaryText : CurrentTheme.secondaryText)
-                .background(background, in: RoundedRectangle(cornerRadius: 6))
-                .onHover { isHovered = $0 }
-        }
-
-        private var background: Color {
-            if configuration.isPressed {
-                return CurrentTheme.fieldBackgroundActive
-            }
-            if isHovered {
-                return CurrentTheme.fieldBackground
-            }
-            return .clear
-        }
-    }
-}
-
-struct DaySectionView: View {
-    var document: DayDocument
-    var isToday: Bool
-    var isActive: Bool
-    var searchQuery: String
-    var configuration: CurrentConfiguration
+    private(set) var document: DayDocument
+    private(set) var isToday: Bool
+    private(set) var isActive: Bool
+    private(set) var searchQuery: String
+    private(set) var configuration: CurrentConfiguration
     var onFocus: () -> Void
     var onChange: (String) -> Void
-
-    @State private var text: String
-    @State private var editorHeight: CGFloat
 
     init(
         document: DayDocument,
@@ -254,6 +139,47 @@ struct DaySectionView: View {
         self.configuration = configuration
         self.onFocus = onFocus
         self.onChange = onChange
+    }
+
+    func update(
+        document: DayDocument,
+        isToday: Bool,
+        isActive: Bool,
+        searchQuery: String,
+        configuration: CurrentConfiguration,
+        onFocus: @escaping () -> Void,
+        onChange: @escaping (String) -> Void
+    ) {
+        let viewChanged = document != self.document
+            || isToday != self.isToday
+            || isActive != self.isActive
+            || searchQuery != self.searchQuery
+            || configuration != self.configuration
+
+        self.onFocus = onFocus
+        self.onChange = onChange
+
+        guard viewChanged else { return }
+
+        objectWillChange.send()
+        self.document = document
+        self.isToday = isToday
+        self.isActive = isActive
+        self.searchQuery = searchQuery
+        self.configuration = configuration
+    }
+}
+
+struct DaySectionView: View {
+    @ObservedObject private var model: DaySectionModel
+
+    @State private var text: String
+    @State private var editorHeight: CGFloat
+
+    init(model: DaySectionModel) {
+        self.model = model
+        let document = model.document
+        let isToday = model.isToday
         let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         _text = State(initialValue: document.text)
         _editorHeight = State(
@@ -278,20 +204,17 @@ struct DaySectionView: View {
         )
         .padding(.horizontal, 0)
         .background(searchHit ? CurrentTheme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 8))
-        .onChange(of: text) { _, newText in
-            guard newText != document.text else { return }
-            onChange(newText)
+        .transaction { transaction in
+            transaction.animation = nil
         }
-        .onChange(of: document.text) { _, newText in
+        .onChange(of: text) { _, newText in
+            guard newText != model.document.text else { return }
+            model.onChange(newText)
+        }
+        .onChange(of: model.document.text) { _, newText in
             if newText != text {
                 text = newText
             }
-        }
-        .onChange(of: document.id) { _, _ in
-            syncDocumentState()
-        }
-        .onChange(of: isActive) { _, _ in
-            syncDocumentState()
         }
     }
 
@@ -300,16 +223,17 @@ struct DaySectionView: View {
             MarkdownEditorView(
                 text: $text,
                 measuredHeight: $editorHeight,
-                configuration: configuration,
-                focusOnAppear: isToday || isActive,
+                dayID: model.document.id,
+                configuration: model.configuration,
+                focusOnAppear: model.isToday,
                 minimumHeight: minimumEditorHeight,
-                onFocus: onFocus
+                onFocus: model.onFocus
             )
             .frame(height: editorHeight)
 
-            if isToday && text.isEmpty {
+            if model.isToday && text.isEmpty {
                 Text("Start writing...")
-                    .font(CurrentTheme.editorSwiftUIFont(configuration: configuration))
+                    .font(CurrentTheme.editorSwiftUIFont(configuration: model.configuration))
                     .foregroundStyle(CurrentTheme.mutedText)
                     .padding(.top, CurrentTheme.editorVerticalInset + 2)
                     .allowsHitTesting(false)
@@ -319,9 +243,9 @@ struct DaySectionView: View {
 
     private var dayDivider: some View {
         Button {
-            onFocus()
+            model.onFocus()
         } label: {
-            HStack(spacing: CurrentTheme.dayDividerSpacing) {
+            HStack(spacing: 0) {
                 Text(dayTitle)
                     .font(CurrentTheme.dayLabel)
                     .tracking(0.72)
@@ -329,7 +253,11 @@ struct DaySectionView: View {
                     .foregroundStyle(dayLabelColor)
                     .lineLimit(1)
                     .monospacedDigit()
-                    .frame(width: CurrentTheme.dayLabelRailWidth, alignment: .leading)
+                    .fixedSize(horizontal: true, vertical: false)
+
+                saveStateSlot
+                    .padding(.leading, CurrentTheme.dayDividerDateStatusSpacing)
+                    .padding(.trailing, CurrentTheme.dayDividerStatusLineSpacing)
 
                 Rectangle()
                     .fill(dayDividerColor)
@@ -340,8 +268,17 @@ struct DaySectionView: View {
         .buttonStyle(.plain)
     }
 
+    private var saveStateSlot: some View {
+        Circle()
+            .fill(saveStateOrbColor)
+            .frame(width: CurrentTheme.daySaveStateOrbSize, height: CurrentTheme.daySaveStateOrbSize)
+            .opacity(showsSaveStateOrb ? 1 : 0)
+            .help(model.document.isDirty ? "Saving" : "Saved")
+            .accessibilityHidden(!showsSaveStateOrb)
+    }
+
     private var minimumEditorHeight: CGFloat {
-        if isToday && text.isEmpty { return 280 }
+        if model.isToday && text.isEmpty { return 280 }
         return 64
     }
 
@@ -350,41 +287,41 @@ struct DaySectionView: View {
     }
 
     private var isExpanded: Bool {
-        isToday || isActive || hasText
+        model.isToday || model.isActive || hasText
     }
 
     private var dayTitle: String {
-        if isToday {
-            return "Today · \(DayFormatting.shortTitle(for: document.date))"
+        if model.isToday {
+            return "Today · \(DayFormatting.shortTitle(for: model.document.date))"
         }
-        return DayFormatting.shortTitle(for: document.date)
+        return DayFormatting.shortTitle(for: model.document.date)
     }
 
     private var dayLabelColor: Color {
-        if isToday || isActive {
+        if model.isToday || model.isActive {
             return CurrentTheme.secondaryText.opacity(0.86)
         }
         return CurrentTheme.mutedText.opacity(0.94)
     }
 
     private var dayDividerColor: Color {
-        if isToday || isActive {
+        if model.isToday || model.isActive {
             return CurrentTheme.dayDivider.opacity(1)
         }
         return CurrentTheme.dayDivider.opacity(0.78)
     }
 
-    private var searchHit: Bool {
-        let query = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !query.isEmpty && text.localizedStandardContains(query)
+    private var showsSaveStateOrb: Bool {
+        model.isActive || model.document.isDirty
     }
 
-    private func syncDocumentState() {
-        let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        text = document.text
-        editorHeight = isToday && !hasText
-            ? TimelineRowHeightCalculator.todayEmptyEditorMinimumHeight
-            : TimelineRowHeightCalculator.expandedEditorMinimumHeight
+    private var saveStateOrbColor: Color {
+        model.document.isDirty ? CurrentTheme.accent.opacity(0.58) : CurrentTheme.mutedText.opacity(0.34)
+    }
+
+    private var searchHit: Bool {
+        let query = model.searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !query.isEmpty && text.localizedStandardContains(query)
     }
 }
 
@@ -402,12 +339,12 @@ public struct CurrentCommands: Commands {
 
     public var body: some Commands {
         CommandGroup(replacing: .appSettings) {
-            Button("Open Config File") {
+            Button("Edit Settings...") {
                 openConfigFile()
             }
             .keyboardShortcut(",", modifiers: [.command])
 
-            Button("Reload Config") {
+            Button("Reload Settings") {
                 reloadConfig(showDiagnostics: true)
             }
             .keyboardShortcut(",", modifiers: [.command, .shift])
@@ -426,26 +363,13 @@ public struct CurrentCommands: Commands {
 
             Divider()
 
-            Button("Copy Current Day") {
-                copy(controller.copyCurrentDayMarkdown())
-            }
-            .keyboardShortcut("c", modifiers: [.command, .option])
-
-            Button("Copy Visible Stream") {
-                copy(controller.copyVisibleStreamMarkdown())
-            }
-
             Button("Reveal Stream Files") {
                 if let stream = controller.stream {
                     NSWorkspace.shared.activateFileViewerSelecting([stream.rootURL])
                 }
             }
+            .keyboardShortcut("r", modifiers: [.command, .option])
         }
-    }
-
-    private func copy(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private func openConfigFile() {
@@ -471,4 +395,5 @@ public struct CurrentCommands: Commands {
             message: diagnostics.map(\.displayMessage).prefix(5).joined(separator: "\n")
         )
     }
+
 }
