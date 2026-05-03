@@ -17,7 +17,7 @@ jobs:
 
     env:
       APP_NAME: Current
-      DERIVED_DATA_PATH: ${{ runner.temp }}/CurrentDerivedData
+      DERIVED_DATA_PATH: ${{ github.workspace }}/.release-derived-data
       DIST_DIR: ${{ github.workspace }}/dist
 
     steps:
