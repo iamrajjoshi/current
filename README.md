@@ -52,6 +52,19 @@ The app is sandboxed by default with basic file access permissions. Modify `Curr
 
 ## Development Notes
 
+### Website
+
+The standalone static website lives in `website/`. It uses Next.js static export and pnpm.
+
+```sh
+pnpm --dir website dev
+pnpm --dir website build
+```
+
+The public routes are `/` for the landing page and `/settings/` for the configuration reference.
+
+Pushes to `main` deploy the static export to GitHub Pages with `.github/workflows/pages.yml`.
+
 ### XcodeBuildMCP
 
 This repo was scaffolded with XcodeBuildMCP and should be built/tested with its CLI tools:

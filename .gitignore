@@ -32,6 +32,11 @@ playground.xcworkspace
 .build/
 default.profraw
 
+# Website
+website/node_modules/
+website/.next/
+website/out/
+
 # CocoaPods
 #
 # We recommend against adding the Pods directory to your .gitignore. However
