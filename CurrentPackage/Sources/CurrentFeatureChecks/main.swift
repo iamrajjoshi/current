@@ -13,6 +13,7 @@ struct CurrentFeatureChecks {
         try dayPathsUseTransparentDailyMarkdownLayout()
         try bootstrapCreatesDailyStreamAndTodayFile()
         try timelineControllerAppliesConfigurationBeforeBootstrap()
+        try timelineControllerUsesConfiguredLibraryRootBeforeBootstrap()
         try loadOlderDaysAppendsPastBelowToday()
         try loadOlderDaysDoesNotCreateMissingDayFiles()
         try loadOlderDaysStopsAtStreamCreation()
@@ -74,6 +75,7 @@ struct CurrentFeatureChecks {
         let store = try configurationStore(
             rootConfig: """
             # Current ignores whole-line comments.
+            library-root = "~/notes/current"
             font-family = "JetBrains Mono"
             font-size = 15
             line-height = 24
@@ -90,6 +92,7 @@ struct CurrentFeatureChecks {
         )
         let configuration = store.configuration
 
+        try check(configuration.libraryRoot?.path.hasSuffix("/home/notes/current") == true, "Quoted library-root did not parse")
         try check(configuration.fontFamily == "JetBrains Mono", "Quoted font-family did not parse")
         try check(configuration.fontSize == 15, "font-size did not parse")
         try check(configuration.lineHeight == 24, "line-height did not parse")
@@ -200,8 +203,9 @@ struct CurrentFeatureChecks {
         let url = try store.ensureEditableConfigurationFile()
         let text = try String(contentsOf: url, encoding: .utf8)
 
-        try check(url == locations.primaryEditableURL, "Open Config File should create the primary XDG config.current")
+        try check(url == locations.primaryEditableURL, "Edit Settings should create the primary XDG config.current")
         try check(text.contains("# Current configuration"), "Editable template should contain commented defaults")
+        try check(text.contains("# library-root = ~/Documents/current"), "Editable template should document the library root")
         try check(text.contains("# hide-empty-weekends = false"), "Editable template should document weekend hiding")
         try check(text.contains("# markdown-marker-visibility = muted"), "Editable template should document marker visibility")
         try check(CurrentConfigurationStore(locations: locations, homeDirectory: home).diagnostics.isEmpty, "Comment-only template should parse cleanly")
@@ -241,7 +245,7 @@ struct CurrentFeatureChecks {
 
         let url = store.dayURL(for: date, in: stream)
 
-        try check(url.path.hasSuffix("/Current/Streams/Daily/2026/04/2026-04-29.md"), "Unexpected day path: \(url.path)")
+        try check(url.path.hasSuffix("/current/streams/daily/2026/04/2026-04-29.md"), "Unexpected day path: \(url.path)")
     }
 
     @MainActor
@@ -261,7 +265,7 @@ struct CurrentFeatureChecks {
         try check(controller.stream?.name == "Daily", "Expected Daily stream")
         try check(controller.days.map(\.id) == ["2026-04-29"], "Bootstrap should not render blank days before stream creation")
         try check(
-            FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-29.md").path),
+            FileManager.default.fileExists(atPath: root.appendingPathComponent("streams/daily/2026/04/2026-04-29.md").path),
             "Today file was not created"
         )
     }
@@ -295,6 +299,32 @@ struct CurrentFeatureChecks {
         try check(
             controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
             "Configured recent and batch day counts should drive launch and older history, got \(controller.days.map(\.id))"
+        )
+    }
+
+    @MainActor
+    static func timelineControllerUsesConfiguredLibraryRootBeforeBootstrap() throws {
+        let root = try temporaryRoot()
+        let configuredRoot = try temporaryDirectory().appendingPathComponent("notes/current", isDirectory: true)
+        let calendar = fixedCalendar()
+        let now = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 9)))
+        let controller = TimelineController(
+            store: StreamStore(libraryRoot: root, calendar: calendar),
+            cache: DayCache(calendar: calendar),
+            now: now
+        )
+
+        controller.apply(configuration: CurrentConfiguration(libraryRoot: configuredRoot, recentDays: 1))
+        controller.bootstrapIfNeeded(now: now)
+
+        try check(controller.store.libraryRoot == configuredRoot.standardizedFileURL, "Controller did not apply configured library root")
+        try check(
+            FileManager.default.fileExists(atPath: configuredRoot.appendingPathComponent("streams/daily/2026/04/2026-04-29.md").path),
+            "Configured library root did not receive today's file"
+        )
+        try check(
+            !FileManager.default.fileExists(atPath: root.appendingPathComponent("streams/daily/2026/04/2026-04-29.md").path),
+            "Fallback library root should stay untouched when library-root is configured"
         )
     }
 
@@ -345,7 +375,7 @@ struct CurrentFeatureChecks {
             "Missing older days should appear in memory for scrollable history"
         )
         try check(
-            !FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-27.md").path),
+            !FileManager.default.fileExists(atPath: root.appendingPathComponent("streams/daily/2026/04/2026-04-27.md").path),
             "Scrolling history should not create missing day files"
         )
     }
@@ -375,7 +405,7 @@ struct CurrentFeatureChecks {
         )
         try check(controller.canLoadOlderDays == false, "History loader should stop when there are no older blanks or files")
         try check(
-            !FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-25.md").path),
+            !FileManager.default.fileExists(atPath: root.appendingPathComponent("streams/daily/2026/04/2026-04-25.md").path),
             "Blank history days should stay in memory until edited"
         )
     }
@@ -576,7 +606,7 @@ struct CurrentFeatureChecks {
 
         controller.save(now)
 
-        let todayPath = root.appendingPathComponent("Streams/Daily/2026/04/2026-04-29.md")
+        let todayPath = root.appendingPathComponent("streams/daily/2026/04/2026-04-29.md")
         let savedText = try String(contentsOf: todayPath, encoding: .utf8)
         try check(savedText == "Pinned dirty note", "Dirty off-window document did not save correctly")
         try check(controller.cache[now]?.isDirty == false, "Saved off-window document should be clean")
@@ -859,8 +889,8 @@ struct CurrentFeatureChecks {
         controller.updateText(for: now, text: "# Meeting\n\n- [ ] Follow up")
         try await Task.sleep(nanoseconds: 130_000_000)
 
-        let todayPath = root.appendingPathComponent("Streams/Daily/2026/04/2026-04-29.md")
-        let yesterdayPath = root.appendingPathComponent("Streams/Daily/2026/04/2026-04-28.md")
+        let todayPath = root.appendingPathComponent("streams/daily/2026/04/2026-04-29.md")
+        let yesterdayPath = root.appendingPathComponent("streams/daily/2026/04/2026-04-28.md")
         let savedText = try String(contentsOf: todayPath, encoding: .utf8)
         try check(savedText == "# Meeting\n\n- [ ] Follow up", "Autosave did not write today's content")
         try check(!FileManager.default.fileExists(atPath: yesterdayPath.path), "Autosave created an untouched previous day")
@@ -887,7 +917,7 @@ struct CurrentFeatureChecks {
         try check(controller.days.map(\.id).first == "2026-04-30", "New today is not at the top")
         try check(controller.days.map(\.id).contains("2026-04-29"), "Rollover should keep post-creation history visible")
         try check(
-            FileManager.default.fileExists(atPath: root.appendingPathComponent("Streams/Daily/2026/04/2026-04-30.md").path),
+            FileManager.default.fileExists(atPath: root.appendingPathComponent("streams/daily/2026/04/2026-04-30.md").path),
             "Rolled-over day file was not created"
         )
     }
@@ -971,7 +1001,7 @@ struct CurrentFeatureChecks {
     }
 
     static func temporaryRoot() throws -> URL {
-        try temporaryDirectory().appendingPathComponent("Current", isDirectory: true)
+        try temporaryDirectory().appendingPathComponent("current", isDirectory: true)
     }
 
     static func storeWithDefaultStreamCreatedAt(_ createdAt: Date, root: URL, calendar: Calendar) throws -> StreamStore {

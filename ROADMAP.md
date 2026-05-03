@@ -5,12 +5,12 @@ Current is a native macOS daily stream Markdown editor. MVP 0 is deliberately na
 ## Phase 0: Capture Core
 
 - Native AppKit-backed Markdown editor
-- One Daily stream
+- One Daily stream (`daily` on disk)
 - Today plus recent timeline
 - Transparent daily files
 - Autosave and conflict handling
 - Lazy history loading
-- Jump to today, insert timestamp, copy, reveal files
+- Jump to today, insert timestamp, reveal files
 
 ## Phase 1: Stream Power
 

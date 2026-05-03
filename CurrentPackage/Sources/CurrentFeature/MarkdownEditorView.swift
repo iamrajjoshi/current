@@ -1,13 +1,16 @@
 import AppKit
 import SwiftUI
 
-extension Notification.Name {
-    static let currentInsertTimestamp = Notification.Name("CurrentInsertTimestamp")
-}
-
 final class MarkdownTextView: NSTextView {
     weak static var activeEditor: MarkdownTextView?
+    private static var editorsByDayID: [String: WeakMarkdownTextView] = [:]
     var onFocus: (() -> Void)?
+    var currentDayID: String? {
+        didSet {
+            Self.unregister(oldValue, editor: self)
+            Self.register(self, dayID: currentDayID)
+        }
+    }
 
     override func becomeFirstResponder() -> Bool {
         let becameFirstResponder = super.becomeFirstResponder()
@@ -69,6 +72,29 @@ final class MarkdownTextView: NSTextView {
         editor.insertText("[\(formatter.string(from: Date()))] ", replacementRange: editor.selectedRange())
     }
 
+    static func focusEditor(dayID: String) {
+        pruneEditorRegistry()
+        guard let editor = editorsByDayID[dayID]?.textView else { return }
+        editor.window?.makeFirstResponder(editor)
+        editor.setSelectedRange(NSRange(location: editor.string.utf16.count, length: 0))
+        editor.scrollRangeToVisible(editor.selectedRange())
+    }
+
+    private static func register(_ editor: MarkdownTextView, dayID: String?) {
+        guard let dayID else { return }
+        editorsByDayID[dayID] = WeakMarkdownTextView(textView: editor)
+    }
+
+    private static func unregister(_ dayID: String?, editor: MarkdownTextView) {
+        guard let dayID,
+              editorsByDayID[dayID]?.textView === editor else { return }
+        editorsByDayID.removeValue(forKey: dayID)
+    }
+
+    private static func pruneEditorRegistry() {
+        editorsByDayID = editorsByDayID.filter { $0.value.textView != nil }
+    }
+
     private func inlineFormattingEdit(
         for event: NSEvent,
         modifiers: NSEvent.ModifierFlags
@@ -106,9 +132,14 @@ final class MarkdownTextView: NSTextView {
     }
 }
 
+private struct WeakMarkdownTextView {
+    weak var textView: MarkdownTextView?
+}
+
 struct MarkdownEditorView: NSViewRepresentable {
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
+    var dayID: String?
     var configuration: CurrentConfiguration = .default
     var focusOnAppear: Bool
     var minimumHeight: CGFloat = 72
@@ -139,6 +170,15 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
+        textView.isAutomaticLinkDetectionEnabled = false
+        textView.isAutomaticDataDetectionEnabled = false
+        textView.isContinuousSpellCheckingEnabled = false
+        textView.isGrammarCheckingEnabled = false
+        textView.enabledTextCheckingTypes = 0
+        textView.linkTextAttributes = [
+            .foregroundColor: CurrentTheme.primaryTextColor,
+            .underlineStyle: 0
+        ]
         textView.backgroundColor = CurrentTheme.editorBackground
         textView.drawsBackground = true
         textView.insertionPointColor = CurrentTheme.primaryTextColor
@@ -159,6 +199,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.minSize = NSSize(width: 0, height: 0)
         textView.string = text
+        textView.currentDayID = dayID
 
         context.coordinator.textView = textView
         context.coordinator.updateTypingAttributes(for: textView)
@@ -179,27 +220,40 @@ struct MarkdownEditorView: NSViewRepresentable {
     }
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        let configurationChanged = context.coordinator.highlightedConfiguration != configuration
         context.coordinator.parent = self
         context.coordinator.highlighter.update(configuration: configuration)
         guard let textView = scrollView.documentView as? MarkdownTextView else { return }
+        let textChanged = !context.coordinator.isUpdatingFromTextView && textView.string != text
+        let widthChanged = abs(context.coordinator.lastMeasuredWidth - scrollView.contentSize.width) > 1
+
+        textView.currentDayID = dayID
+        textView.onFocus = {
+            context.coordinator.parent.onFocus()
+        }
+
+        guard textChanged || configurationChanged || widthChanged else { return }
+
         scrollView.appearance = NSAppearance(named: .aqua)
         textView.appearance = NSAppearance(named: .aqua)
         textView.backgroundColor = CurrentTheme.editorBackground
         textView.insertionPointColor = CurrentTheme.primaryTextColor
         textView.textColor = CurrentTheme.primaryTextColor
-        textView.onFocus = {
-            context.coordinator.parent.onFocus()
+        if configurationChanged {
+            context.coordinator.updateTypingAttributes(for: textView)
         }
-        context.coordinator.updateTypingAttributes(for: textView)
-        context.coordinator.highlighter.highlight(textView.textStorage!)
 
-        if !context.coordinator.isUpdatingFromTextView, textView.string != text {
+        if textChanged {
             context.coordinator.isUpdatingFromSwiftUI = true
             let selection = textView.selectedRange()
             textView.string = text
             textView.setSelectedRange(selection.location <= textView.string.utf16.count ? selection : NSRange(location: textView.string.utf16.count, length: 0))
             context.coordinator.highlighter.highlight(textView.textStorage!)
+            context.coordinator.highlightedConfiguration = configuration
             context.coordinator.isUpdatingFromSwiftUI = false
+        } else if configurationChanged {
+            context.coordinator.highlighter.highlight(textView.textStorage!)
+            context.coordinator.highlightedConfiguration = configuration
         }
 
         DispatchQueue.main.async {
@@ -215,16 +269,20 @@ struct MarkdownEditorView: NSViewRepresentable {
         var isUpdatingFromSwiftUI = false
         var isUpdatingFromTextView = false
         var didFocusInitially = false
+        var highlightedConfiguration: CurrentConfiguration
+        var lastMeasuredWidth: CGFloat = 0
 
         init(_ parent: MarkdownEditorView) {
             self.parent = parent
             self.highlighter = MarkdownSyntaxHighlighter(configuration: parent.configuration)
+            self.highlightedConfiguration = parent.configuration
         }
 
         func textDidBeginEditing(_ notification: Notification) {
             guard let textView = notification.object as? MarkdownTextView else { return }
             MarkdownTextView.activeEditor = textView
             parent.onFocus()
+            clearTemporaryDecorations(for: textView)
             updateTypingAttributes(for: textView)
         }
 
@@ -233,6 +291,7 @@ struct MarkdownEditorView: NSViewRepresentable {
                   let textView = notification.object as? MarkdownTextView else { return }
             isUpdatingFromTextView = true
             highlighter.highlight(textView.textStorage!)
+            highlightedConfiguration = parent.configuration
             updateTypingAttributes(for: textView)
             parent.text = textView.string
             isUpdatingFromTextView = false
@@ -255,6 +314,7 @@ struct MarkdownEditorView: NSViewRepresentable {
             layoutManager.ensureLayout(for: textContainer)
             let used = layoutManager.usedRect(for: textContainer)
             let target = max(parent.minimumHeight, ceil(used.height + textView.textContainerInset.height * 2 + 6))
+            lastMeasuredWidth = scrollView.contentSize.width
             if abs(parent.measuredHeight - target) > 1 {
                 parent.measuredHeight = target
             }
@@ -270,7 +330,10 @@ struct MarkdownEditorView: NSViewRepresentable {
                 .font: CurrentTheme.editorFont(configuration: parent.configuration),
                 .foregroundColor: CurrentTheme.primaryTextColor,
                 .paragraphStyle: paragraph,
-                .baselineOffset: CurrentTheme.editorBaselineOffset
+                .baselineOffset: CurrentTheme.editorBaselineOffset,
+                .underlineStyle: 0,
+                .strikethroughStyle: 0,
+                .backgroundColor: NSColor.clear
             ]
 
             let selection = textView.selectedRange()
@@ -286,6 +349,16 @@ struct MarkdownEditorView: NSViewRepresentable {
             }
 
             textView.typingAttributes = attributes
+        }
+
+        private func clearTemporaryDecorations(for textView: NSTextView) {
+            guard let textStorage = textView.textStorage else { return }
+            highlighter.clearTemporaryDecorations(textStorage)
+            if textStorage.length > 0 {
+                textView.layoutManager?.invalidateDisplay(
+                    forCharacterRange: NSRange(location: 0, length: textStorage.length)
+                )
+            }
         }
     }
 }

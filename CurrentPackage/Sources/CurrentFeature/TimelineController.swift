@@ -149,7 +149,7 @@ public final class TimelineController: ObservableObject {
     @Published public var searchQuery = ""
     @Published public var notice: TimelineNotice?
 
-    public let store: StreamStore
+    public private(set) var store: StreamStore
     public var cache: DayCache
     public var recentDayCount: Int
     public var historyBatchSize: Int
@@ -160,6 +160,7 @@ public final class TimelineController: ObservableObject {
     private var windowState: TimelineWindowState
     private var pendingSaves: [Date: DispatchWorkItem] = [:]
     private let calendar: Calendar
+    private let fallbackLibraryRoot: URL
     private var configuration: CurrentConfiguration = .default
 
     public init(
@@ -180,6 +181,7 @@ public final class TimelineController: ObservableObject {
         self.estimatedCollapsedDayHeight = estimatedCollapsedDayHeight
         self.autosaveDelay = autosaveDelay
         self.calendar = store.calendar
+        self.fallbackLibraryRoot = store.libraryRoot.standardizedFileURL
         self.today = store.calendar.startOfDay(for: now)
         self.windowState = TimelineWindowState(
             retainedDayCount: historyWindowDayCount,
@@ -209,13 +211,17 @@ public final class TimelineController: ObservableObject {
     }
 
     public func apply(configuration: CurrentConfiguration) {
+        let wasBootstrapped = isBootstrapped
         self.configuration = configuration
+        let libraryRootChanged = applyLibraryRoot(configuration.libraryRoot)
         recentDayCount = max(1, configuration.recentDays)
         historyBatchSize = max(1, configuration.historyBatchDays)
         historyWindowDayCount = max(1, configuration.historyWindowDays)
         autosaveDelay = max(0, configuration.autosaveDelay)
         syncWindowConfiguration()
-        if isBootstrapped {
+        if libraryRootChanged, wasBootstrapped {
+            bootstrapIfNeeded(now: today)
+        } else if isBootstrapped {
             publishDays()
         }
     }
@@ -269,13 +275,17 @@ public final class TimelineController: ObservableObject {
     public func updateText(for date: Date, text: String) {
         let key = calendar.startOfDay(for: date)
         guard cache.updateText(for: key, text: text) != nil else { return }
-        activeDate = key
+        if activeDate != key {
+            activeDate = key
+        }
         publishDays()
         scheduleAutosave(for: key)
     }
 
     public func setActiveDate(_ date: Date) {
-        activeDate = calendar.startOfDay(for: date)
+        let key = calendar.startOfDay(for: date)
+        guard activeDate != key else { return }
+        activeDate = key
     }
 
     public var activeDocument: DayDocument? {
@@ -357,6 +367,7 @@ public final class TimelineController: ObservableObject {
 
     public func jumpToToday() {
         syncWindowConfiguration()
+        activeDate = today
         if let stream {
             windowState.reset(to: recentDates(endingAt: today, in: stream))
             canLoadOlderDays = hasOlderDates(before: windowState.dates.last, in: stream)
@@ -367,18 +378,6 @@ public final class TimelineController: ObservableObject {
 
         publishDays()
         scrollRequest = .today(DayFormatting.dayKey(for: today, calendar: calendar))
-    }
-
-    public func copyCurrentDayMarkdown() -> String {
-        cache[today]?.text ?? ""
-    }
-
-    public func copyVisibleStreamMarkdown() -> String {
-        days.map { document in
-            "# \(DayFormatting.visibleTitle(for: document.date))\n\n\(document.text)"
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        .joined(separator: "\n\n")
     }
 
     public func searchMatchCount() -> Int {
@@ -500,6 +499,28 @@ public final class TimelineController: ObservableObject {
     private func syncWindowConfiguration() {
         windowState.retainedDayCount = max(1, historyWindowDayCount)
         windowState.batchSize = max(1, historyBatchSize)
+    }
+
+    @discardableResult
+    private func applyLibraryRoot(_ libraryRoot: URL?) -> Bool {
+        let desiredRoot = (libraryRoot ?? fallbackLibraryRoot).standardizedFileURL
+        guard store.libraryRoot.standardizedFileURL != desiredRoot else { return false }
+
+        flushSaves()
+        guard cache.dirtyDocuments.isEmpty else { return false }
+
+        store = StreamStore(libraryRoot: desiredRoot, calendar: calendar)
+        cache = DayCache(maxCleanDocuments: cache.maxCleanDocuments, calendar: calendar)
+        stream = nil
+        days = []
+        activeDate = nil
+        scrollRequest = nil
+        canLoadOlderDays = true
+        topSpacerHeight = 0
+        bottomSpacerHeight = 0
+        windowState.reset(to: [])
+        isBootstrapped = false
+        return true
     }
 
     private func publishDays() {

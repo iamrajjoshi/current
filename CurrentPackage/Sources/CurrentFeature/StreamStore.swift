@@ -2,7 +2,7 @@ import Foundation
 
 public final class StreamStore {
     public static let defaultStreamName = "Daily"
-    public static let defaultStreamSlug = "Daily"
+    public static let defaultStreamSlug = "daily"
 
     public let libraryRoot: URL
     public var calendar: Calendar
@@ -22,12 +22,12 @@ public final class StreamStore {
     public static func defaultLibraryRoot() -> URL {
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         return (documents ?? URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent("Documents", isDirectory: true))
-            .appendingPathComponent("Current", isDirectory: true)
+            .appendingPathComponent("current", isDirectory: true)
     }
 
     public func defaultStream() throws -> Stream {
         let streamRoot = libraryRoot
-            .appendingPathComponent("Streams", isDirectory: true)
+            .appendingPathComponent("streams", isDirectory: true)
             .appendingPathComponent(Self.defaultStreamSlug, isDirectory: true)
         try createDirectoryIfNeeded(streamRoot)
 

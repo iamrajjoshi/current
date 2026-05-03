@@ -43,8 +43,9 @@ enum CurrentTheme {
     static let historyPreloadDistance: CGFloat = 280
     static let historyResetDistance: CGFloat = 32
     static let scrollTargetAnchorY: CGFloat = 0.18
-    static let dayLabelRailWidth: CGFloat = 146
-    static let dayDividerSpacing: CGFloat = 12
+    static let daySaveStateOrbSize: CGFloat = 5
+    static let dayDividerDateStatusSpacing: CGFloat = 11
+    static let dayDividerStatusLineSpacing: CGFloat = 10
     static let dayDividerIntrinsicHeight: CGFloat = 14
     static let daySectionVerticalPaddingCollapsed: CGFloat = 8
     static let daySectionVerticalPaddingExpanded: CGFloat = 13

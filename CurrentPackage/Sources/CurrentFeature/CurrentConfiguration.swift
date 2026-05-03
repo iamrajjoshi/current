@@ -16,7 +16,9 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     public static let defaultAutosaveDelay: Double = 0.55
     public static let defaultHideEmptyWeekends = false
     public static let defaultMarkdownMarkerVisibility = MarkdownMarkerVisibility.muted
+    public static let defaultLibraryRoot: URL? = nil
 
+    public var libraryRoot: URL?
     public var fontFamily: String?
     public var fontSize: Double
     public var lineHeight: Double
@@ -29,6 +31,7 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     public var markdownMarkerVisibility: MarkdownMarkerVisibility
 
     public init(
+        libraryRoot: URL? = Self.defaultLibraryRoot,
         fontFamily: String? = Self.defaultFontFamily,
         fontSize: Double = Self.defaultFontSize,
         lineHeight: Double = Self.defaultLineHeight,
@@ -40,6 +43,7 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
         hideEmptyWeekends: Bool = Self.defaultHideEmptyWeekends,
         markdownMarkerVisibility: MarkdownMarkerVisibility = Self.defaultMarkdownMarkerVisibility
     ) {
+        self.libraryRoot = libraryRoot
         self.fontFamily = fontFamily
         self.fontSize = fontSize
         self.lineHeight = lineHeight
@@ -59,6 +63,7 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     # Syntax is key = value. Blank lines and whole-line # comments are ignored.
     # Empty values reset a setting to Current's default.
     #
+    # library-root = ~/Documents/current
     # font-family =
     # font-size = 13
     # line-height = 22
@@ -405,6 +410,10 @@ private enum CurrentConfigurationLoader {
         context: inout LoadingContext
     ) {
         switch key {
+        case "library-root":
+            context.configuration.libraryRoot = value.isEmpty
+                ? CurrentConfiguration.default.libraryRoot
+                : CurrentConfigurationLocations.fileURL(for: value, homeDirectory: context.homeDirectory).standardizedFileURL
         case "font-family":
             context.configuration.fontFamily = value.isEmpty ? CurrentConfiguration.default.fontFamily : value
         case "font-size":

@@ -6,15 +6,16 @@ The project uses a **workspace + SPM package** architecture for clean separation
 
 ## MVP 0
 
-- One default stream: **Daily**
+- One default stream: **Daily** (`daily` on disk)
 - Today plus recent days in a single scrollable timeline
-- Transparent storage at `~/Documents/Current/Streams/Daily/YYYY/MM/YYYY-MM-DD.md`
+- Transparent storage at `~/Documents/current/streams/daily/YYYY/MM/YYYY-MM-DD.md`
+- Configurable base folder with `library-root = ~/Documents/current`
 - Generated day dividers in the UI; each Markdown file contains only that day's notes
 - AppKit `NSTextView`-backed Markdown editor sections
 - Syntax highlighting for headings, lists, checkboxes, links, emphasis, blockquotes, inline code, and fenced code blocks
 - Paste handling for plain text, Markdown, rich text, URLs, HTML snippets, and large meeting-note dumps
 - Autosave per day file with external edit conflict detection
-- Jump to today, insert timestamp, copy current day, copy visible stream, and reveal files
+- Jump to today, insert timestamp, and reveal files
 
 ## Project Architecture
 

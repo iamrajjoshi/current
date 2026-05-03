@@ -269,10 +269,23 @@ extension TimelineCollectionView {
 
             let nextItems = Self.items(from: nextParent)
             let structureChanged = nextItems.map(\.identity) != items.map(\.identity)
+            let contentChanged = nextItems != items
             let spacerChanged = abs(nextParent.topSpacerHeight - parent.topSpacerHeight) > 0.5
                 || abs(nextParent.bottomSpacerHeight - parent.bottomSpacerHeight) > 0.5
             let searchChanged = nextParent.searchQuery != lastSearchQuery
+            let activeDayChanged = nextParent.activeDayID != parent.activeDayID
+            let configurationChanged = nextParent.configuration != parent.configuration
+            let todayChanged = nextParent.today != parent.today
+            let activeOnlyChanged = activeDayChanged
+                && !structureChanged
+                && !contentChanged
+                && !spacerChanged
+                && !searchChanged
+                && !configurationChanged
+                && !todayChanged
             let anchor = structureChanged || spacerChanged ? captureFirstVisibleDayAnchor() : nil
+            let previousActiveDayID = parent.activeDayID
+            let nextActiveDayID = nextParent.activeDayID
 
             parent = nextParent
             isApplyingSnapshot = true
@@ -289,6 +302,13 @@ extension TimelineCollectionView {
                 syncCollectionViewFrame()
                 if let anchor {
                     restore(anchor)
+                }
+            } else if activeOnlyChanged {
+                reconfigureVisibleDayItems(matching: Set([previousActiveDayID, nextActiveDayID].compactMap { $0 }))
+                if activeChangeCanAffectRowHeight(previousActiveDayID, nextActiveDayID) {
+                    collectionView.collectionViewLayout?.invalidateLayout()
+                    collectionView.layoutSubtreeIfNeeded()
+                    syncCollectionViewFrame()
                 }
             } else {
                 reconfigureVisibleDayItems()
@@ -556,6 +576,11 @@ extension TimelineCollectionView {
             let viewportHeight = scrollView.contentView.bounds.height
             let targetY = attributes.frame.minY - viewportHeight * CurrentTheme.scrollTargetAnchorY
             scroll(toY: targetY, in: scrollView, collectionView: collectionView)
+            if case .today = request.target {
+                DispatchQueue.main.async {
+                    MarkdownTextView.focusEditor(dayID: request.dayID)
+                }
+            }
             handledScrollRequestID = request.id
         }
 
@@ -568,11 +593,14 @@ extension TimelineCollectionView {
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
-        private func reconfigureVisibleDayItems() {
+        private func reconfigureVisibleDayItems(matching dayIDs: Set<String>? = nil) {
             guard let collectionView else { return }
             for indexPath in collectionView.indexPathsForVisibleItems() where indexPath.item < items.count {
                 guard case .day(let document) = items[indexPath.item],
                       let dayItem = collectionView.item(at: indexPath) as? TimelineDayCollectionItem else { continue }
+                if let dayIDs, !dayIDs.contains(document.id) {
+                    continue
+                }
                 dayItem.configure(
                     document: document,
                     isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
@@ -583,6 +611,17 @@ extension TimelineCollectionView {
                     onChange: parent.onChange
                 )
             }
+        }
+
+        private func activeChangeCanAffectRowHeight(_ previousActiveDayID: String?, _ nextActiveDayID: String?) -> Bool {
+            [previousActiveDayID, nextActiveDayID]
+                .compactMap { $0 }
+                .contains { dayID in
+                    guard case .day(let document) = items.first(where: { $0.dayID == dayID }) else { return false }
+                    let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let isToday = Calendar.current.isDate(document.date, inSameDayAs: parent.today)
+                    return !hasText && !isToday
+                }
         }
 
         private func indexPath(forDayID dayID: String) -> IndexPath? {
@@ -630,6 +669,7 @@ private struct ScrollAnchor {
 final class TimelineDayCollectionItem: NSCollectionViewItem {
     static let reuseIdentifier = NSUserInterfaceItemIdentifier("TimelineDayCollectionItem")
     private var hostingView: NSHostingView<DaySectionView>?
+    private var model: DaySectionModel?
     private var representedDayID: String?
 
     override func loadView() {
@@ -641,6 +681,7 @@ final class TimelineDayCollectionItem: NSCollectionViewItem {
     override func prepareForReuse() {
         super.prepareForReuse()
         representedDayID = nil
+        model = nil
         hostingView?.removeFromSuperview()
         hostingView = nil
     }
@@ -656,26 +697,45 @@ final class TimelineDayCollectionItem: NSCollectionViewItem {
     ) {
         if representedDayID != document.id {
             representedDayID = document.id
+            model = nil
             hostingView?.removeFromSuperview()
             hostingView = nil
         }
 
-        let rootView = DaySectionView(
+        let focus = {
+            onFocus(document.date)
+        }
+        let change = { text in
+            onChange(document.date, text)
+        }
+
+        if let model {
+            model.update(
+                document: document,
+                isToday: isToday,
+                isActive: isActive,
+                searchQuery: searchQuery,
+                configuration: configuration,
+                onFocus: focus,
+                onChange: change
+            )
+            return
+        }
+
+        let model = DaySectionModel(
             document: document,
             isToday: isToday,
             isActive: isActive,
             searchQuery: searchQuery,
             configuration: configuration,
-            onFocus: {
-                onFocus(document.date)
-            },
-            onChange: { text in
-                onChange(document.date, text)
-            }
+            onFocus: focus,
+            onChange: change
         )
+        let rootView = DaySectionView(model: model)
 
         if let hostingView {
             hostingView.rootView = rootView
+            self.model = model
         } else {
             let hostingView = NSHostingView(rootView: rootView)
             hostingView.translatesAutoresizingMaskIntoConstraints = false
@@ -691,6 +751,7 @@ final class TimelineDayCollectionItem: NSCollectionViewItem {
                 hostingView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
             ])
             self.hostingView = hostingView
+            self.model = model
         }
     }
 }
