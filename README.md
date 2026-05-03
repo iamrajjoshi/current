@@ -168,3 +168,7 @@ To include assets in your feature package:
 
 ### Generated with XcodeBuildMCP
 This project was scaffolded using [XcodeBuildMCP](https://github.com/cameroncooke/XcodeBuildMCP), which provides tools for AI-assisted macOS development workflows.
+
+## License
+
+[MIT](LICENSE)
