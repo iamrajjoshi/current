@@ -54,6 +54,7 @@ public struct ContentView: View {
             days: displayedDays,
             today: controller.today,
             activeDayID: controller.activeDayID,
+            minimizedDayIDs: controller.minimizedDayIDs,
             searchQuery: controller.searchQuery,
             configuration: configurationStore.configuration,
             canLoadOlderDays: controller.canLoadOlderDays,
@@ -65,6 +66,9 @@ public struct ContentView: View {
             },
             onChange: { date, text in
                 controller.updateText(for: date, text: text)
+            },
+            onToggleMinimized: { date in
+                controller.toggleDayMinimized(date)
             },
             onLoadOlder: {
                 controller.loadOlderWindow()
@@ -118,46 +122,56 @@ final class DaySectionModel: @preconcurrency ObservableObject {
     private(set) var document: DayDocument
     private(set) var isToday: Bool
     private(set) var isActive: Bool
+    private(set) var isMinimized: Bool
     private(set) var searchQuery: String
     private(set) var configuration: CurrentConfiguration
     var onFocus: () -> Void
     var onChange: (String) -> Void
+    var onToggleMinimized: () -> Void
 
     init(
         document: DayDocument,
         isToday: Bool,
         isActive: Bool,
+        isMinimized: Bool,
         searchQuery: String,
         configuration: CurrentConfiguration,
         onFocus: @escaping () -> Void,
-        onChange: @escaping (String) -> Void
+        onChange: @escaping (String) -> Void,
+        onToggleMinimized: @escaping () -> Void
     ) {
         self.document = document
         self.isToday = isToday
         self.isActive = isActive
+        self.isMinimized = isMinimized
         self.searchQuery = searchQuery
         self.configuration = configuration
         self.onFocus = onFocus
         self.onChange = onChange
+        self.onToggleMinimized = onToggleMinimized
     }
 
     func update(
         document: DayDocument,
         isToday: Bool,
         isActive: Bool,
+        isMinimized: Bool,
         searchQuery: String,
         configuration: CurrentConfiguration,
         onFocus: @escaping () -> Void,
-        onChange: @escaping (String) -> Void
+        onChange: @escaping (String) -> Void,
+        onToggleMinimized: @escaping () -> Void
     ) {
         let viewChanged = document != self.document
             || isToday != self.isToday
             || isActive != self.isActive
+            || isMinimized != self.isMinimized
             || searchQuery != self.searchQuery
             || configuration != self.configuration
 
         self.onFocus = onFocus
         self.onChange = onChange
+        self.onToggleMinimized = onToggleMinimized
 
         guard viewChanged else { return }
 
@@ -165,6 +179,7 @@ final class DaySectionModel: @preconcurrency ObservableObject {
         self.document = document
         self.isToday = isToday
         self.isActive = isActive
+        self.isMinimized = isMinimized
         self.searchQuery = searchQuery
         self.configuration = configuration
     }
@@ -198,10 +213,8 @@ struct DaySectionView: View {
                     .padding(.top, CurrentTheme.dayEditorTopPadding)
             }
         }
-        .padding(
-            .vertical,
-            isExpanded ? CurrentTheme.daySectionVerticalPaddingExpanded : CurrentTheme.daySectionVerticalPaddingCollapsed
-        )
+        .padding(.top, daySectionTopPadding)
+        .padding(.bottom, daySectionBottomPadding)
         .padding(.horizontal, 0)
         .background(searchHit ? CurrentTheme.accentSoft : Color.clear, in: RoundedRectangle(cornerRadius: 8))
         .transaction { transaction in
@@ -243,7 +256,7 @@ struct DaySectionView: View {
 
     private var dayDivider: some View {
         Button {
-            model.onFocus()
+            handleDayDividerTap()
         } label: {
             HStack(spacing: 0) {
                 Text(dayTitle)
@@ -266,6 +279,7 @@ struct DaySectionView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help(dayDividerHelp)
     }
 
     private var saveStateSlot: some View {
@@ -287,7 +301,48 @@ struct DaySectionView: View {
     }
 
     private var isExpanded: Bool {
-        model.isToday || model.isActive || hasText
+        !model.isMinimized && (model.isToday || model.isActive || hasText)
+    }
+
+    private var daySectionTopPadding: CGFloat {
+        hasText ? CurrentTheme.daySectionVerticalPaddingExpanded : CurrentTheme.daySectionVerticalPaddingCollapsed
+    }
+
+    private var daySectionBottomPadding: CGFloat {
+        if isExpanded {
+            return CurrentTheme.daySectionVerticalPaddingExpanded
+        }
+
+        if hasText {
+            return max(
+                0,
+                TimelineRowHeightCalculator.collapsedEmptyDayHeight
+                - CurrentTheme.daySectionVerticalPaddingExpanded
+                - CurrentTheme.dayDividerIntrinsicHeight
+            )
+        }
+
+        return CurrentTheme.daySectionVerticalPaddingCollapsed
+    }
+
+    private var canToggleMinimized: Bool {
+        !model.isToday && hasText
+    }
+
+    private func handleDayDividerTap() {
+        if canToggleMinimized {
+            model.onToggleMinimized()
+        } else {
+            model.onFocus()
+        }
+    }
+
+    private var dayDividerHelp: String {
+        if model.isToday { return "Focus today" }
+        if canToggleMinimized {
+            return model.isMinimized ? "Expand day" : "Minimize day"
+        }
+        return "Focus day"
     }
 
     private var dayTitle: String {
@@ -298,21 +353,21 @@ struct DaySectionView: View {
     }
 
     private var dayLabelColor: Color {
-        if model.isToday || model.isActive {
+        if model.isToday || (model.isActive && !model.isMinimized) {
             return CurrentTheme.secondaryText.opacity(0.86)
         }
         return CurrentTheme.mutedText.opacity(0.94)
     }
 
     private var dayDividerColor: Color {
-        if model.isToday || model.isActive {
+        if model.isToday || (model.isActive && !model.isMinimized) {
             return CurrentTheme.dayDivider.opacity(1)
         }
         return CurrentTheme.dayDivider.opacity(0.78)
     }
 
     private var showsSaveStateOrb: Bool {
-        model.isActive || model.document.isDirty
+        (model.isActive && !model.isMinimized) || model.document.isDirty
     }
 
     private var saveStateOrbColor: Color {

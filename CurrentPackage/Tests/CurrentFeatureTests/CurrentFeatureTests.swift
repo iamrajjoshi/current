@@ -9,6 +9,42 @@ func currentFeatureTestsCompile() {
 }
 
 @Test
+func minimizedSearchMatchesExpandTemporarily() {
+    let document = DayDocument(
+        streamID: UUID(),
+        date: Date(timeIntervalSince1970: 0),
+        fileURL: URL(fileURLWithPath: "/tmp/day.md"),
+        text: "needle notes"
+    )
+    let minimizedDayIDs = Set([document.id])
+
+    #expect(TimelineDayPresentation.isEffectivelyMinimized(
+        document: document,
+        isToday: false,
+        minimizedDayIDs: minimizedDayIDs,
+        searchQuery: ""
+    ))
+    #expect(!TimelineDayPresentation.isEffectivelyMinimized(
+        document: document,
+        isToday: false,
+        minimizedDayIDs: minimizedDayIDs,
+        searchQuery: "needle"
+    ))
+    #expect(TimelineDayPresentation.isEffectivelyMinimized(
+        document: document,
+        isToday: false,
+        minimizedDayIDs: minimizedDayIDs,
+        searchQuery: "missing"
+    ))
+    #expect(!TimelineDayPresentation.isEffectivelyMinimized(
+        document: document,
+        isToday: true,
+        minimizedDayIDs: minimizedDayIDs,
+        searchQuery: ""
+    ))
+}
+
+@Test
 func highlighterUnderlinesOnlyExplicitUnderlineContent() {
     let text = "<u>sdhusiafsd</u>\nadfjkhsd"
     let storage = highlightedStorage(text)
