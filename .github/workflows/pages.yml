@@ -47,9 +47,6 @@ jobs:
 
       - name: Build website
         working-directory: website
-        env:
-          GITHUB_PAGES: "true"
-          NEXT_PUBLIC_BASE_PATH: /current
         run: pnpm build
 
       - name: Disable Jekyll processing
