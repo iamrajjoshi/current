@@ -195,10 +195,9 @@ struct DaySectionView: View {
         self.model = model
         let document = model.document
         let isToday = model.isToday
-        let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         _text = State(initialValue: document.text)
         _editorHeight = State(
-            initialValue: isToday && !hasText
+            initialValue: isToday
                 ? TimelineRowHeightCalculator.todayEmptyEditorMinimumHeight
                 : TimelineRowHeightCalculator.expandedEditorMinimumHeight
         )
@@ -292,12 +291,12 @@ struct DaySectionView: View {
     }
 
     private var minimumEditorHeight: CGFloat {
-        if model.isToday && text.isEmpty { return 280 }
-        return 64
+        if model.isToday { return TimelineRowHeightCalculator.todayEmptyEditorMinimumHeight }
+        return TimelineRowHeightCalculator.expandedEditorMinimumHeight
     }
 
     private var hasText: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        MarkdownBlockRendering.hasRenderedContent(in: text)
     }
 
     private var isExpanded: Bool {
@@ -305,7 +304,11 @@ struct DaySectionView: View {
     }
 
     private var daySectionTopPadding: CGFloat {
-        hasText ? CurrentTheme.daySectionVerticalPaddingExpanded : CurrentTheme.daySectionVerticalPaddingCollapsed
+        if isExpanded {
+            return CurrentTheme.daySectionVerticalPaddingExpanded
+        }
+
+        return hasText ? CurrentTheme.daySectionVerticalPaddingExpanded : CurrentTheme.daySectionVerticalPaddingCollapsed
     }
 
     private var daySectionBottomPadding: CGFloat {

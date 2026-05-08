@@ -11,7 +11,7 @@ Current exists for quick capture and continuous review:
 - Open the app and immediately write.
 - Keep today's note visually primary.
 - Keep previous days available without making the screen feel busy.
-- Preserve Markdown as plain text, with syntax highlighting as a reading aid.
+- Preserve Markdown as plain text on disk, while the editor renders common formatting without visible marker syntax.
 - Make files, native find, and timestamps available through quiet native controls.
 - Avoid UI that asks the user to manage layout before they can write.
 
@@ -104,22 +104,27 @@ Guidance:
 
 ### Markdown Syntax
 
-Syntax highlighting should clarify structure without turning notes into colorful code.
+Syntax highlighting should clarify structure without turning notes into colorful code. Common styling syntax is hidden in the editor while remaining in the saved Markdown text.
 
 | Element | Treatment |
 | --- | --- |
 | Body text | `primaryText`, editor regular font |
-| Markdown markers | `mutedText` or `secondaryText` at reduced emphasis |
+| Markdown markers | heading `#` prefixes stay visible; inline formatting, links, inline code, and inactive horizontal rules hide their markers |
 | Headings | editor font at 14px, semibold, `primaryText` |
 | Bold | editor font semibold |
 | Italic | slight obliqueness, not a separate decorative font |
 | Links | `accent`, no heavy underline while editing |
+| Horizontal rules | 1px `divider`, marker text hidden |
 | Blockquotes | `secondaryText`, optional muted marker |
 | Inline code | editor font, `secondaryText`, soft background no stronger than 6 percent black or 8 percent white |
 | Fenced code | editor font, `secondaryText`, no boxed card surface in edit mode |
 | Checkboxes and list markers | marker muted, content primary |
 
 Headings should be subtly stronger, not oversized. The editor should still feel like one plain-text stream.
+
+The editor is WYSIWYG over Markdown, not rich-text storage. A shared TextKit render model owns block parsing, inline mark parsing, hidden syntax ranges, horizontal-rule state, selection normalization, caret geometry, and measurement. Formatting commands should feel Notion-like: shortcuts toggle one instance of each mark, compatible marks can stack, inline code is exclusive, list/task/heading prefixes are structural, and collapsed shortcuts set pending typing marks rather than inserting visible empty wrappers.
+
+Horizontal rules are native editor block decorations. A literal `---` remains visible while it is incomplete at EOF; pressing Return commits it into exactly one divider line while the note still stores `---`. Divider geometry must be measured and drawn from the same TextKit line-fragment model as the visible editor so typing on the next line does not move the divider or the viewport.
 
 ### Chrome
 
@@ -194,7 +199,7 @@ Implementation home: `DaySectionView.dayDivider`.
 
 ### Editor
 
-Implementation homes: `MarkdownEditorView` and `MarkdownSyntaxHighlighter`.
+Implementation homes: `MarkdownEditorView`, `MarkdownTextStorage`, `MarkdownEditorRenderModel`, and `MarkdownSyntaxHighlighter`.
 
 - Use an AppKit `NSTextView`.
 - Preserve native undo, find panel behavior, paste behavior, and keyboard editing.
@@ -202,7 +207,10 @@ Implementation homes: `MarkdownEditorView` and `MarkdownSyntaxHighlighter`.
 - Use `CurrentTheme.editorBackground` for the text view background.
 - Keep text container line fragment padding at `0`.
 - Do not wrap the text view in a card, panel, or bordered surface.
-- Keep syntax highlighting incremental and low-contrast.
+- Apply Markdown decorations from the TextKit editing pipeline, scoped to the edited paragraph and adjacent syntax-dependent lines.
+- Keep caret, selection, row-height measurement, and horizontal-rule drawing anchored to the same rendered TextKit geometry.
+- Avoid reconfiguring the active SwiftUI day item on every keystroke; the focused AppKit editor owns local typing state, and the timeline only invalidates layout when rendered height actually changes.
+- Keep formatting rendering incremental, low-contrast, and faithful to the underlying Markdown.
 
 ### No Persistent Bottom Bar
 
@@ -263,7 +271,7 @@ Future roadmap items should extend the design system without turning Current int
 1. Expand `CurrentTheme` into semantic light and dark tokens for page, chrome, editor, text, dividers, fields, and accent.
 2. Update editor typography tokens to 13px with 21px to 22px line height.
 3. Update `ContentView` to consume semantic chrome, search, divider, and text tokens instead of raw opacity values.
-4. Tune `MarkdownSyntaxHighlighter` to use semantic syntax colors and reduce contrast on Markdown markers.
+4. Tune `MarkdownSyntaxHighlighter` to hide styling markers while applying semantic visual treatment to the visible content.
 5. Verify the live app in light mode first, then dark mode.
 6. Keep behavior unchanged unless a visual issue reveals an interaction bug.
 
@@ -276,7 +284,7 @@ Future roadmap items should extend the design system without turning Current int
 - No persistent bottom bar appears in the default capture view.
 - Day dividers are scannable and remain the main timeline structure.
 - Editor text is easier to read than the current 12px baseline.
-- Syntax highlighting clarifies Markdown without becoming colorful or busy.
+- Formatting rendering clarifies Markdown without becoming colorful or busy.
 - No major surface looks like a nested card.
 - Icon buttons remain stable in size and have help text.
 - The writing column remains centered and readable at narrow and wide window sizes.
@@ -289,8 +297,8 @@ Future roadmap items should extend the design system without turning Current int
 - Do not introduce saturated multi-color syntax highlighting.
 - Do not use decorative gradients, blobs, or illustration backgrounds.
 - Do not make search, preview, AI, or future sidebars compete with the daily stream.
-- Do not replace native text editing behavior for visual polish.
-- Do not hide plain Markdown syntax in edit mode.
+- Do not replace native text editing behavior beyond the small Markdown boundary behaviors needed for hidden syntax.
+- Do not change the saved plain-text Markdown format for visual polish.
 
 ## File Ownership
 

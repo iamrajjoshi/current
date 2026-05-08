@@ -1,10 +1,173 @@
 import AppKit
 import SwiftUI
 
+final class MarkdownLayoutManager: NSLayoutManager, NSLayoutManagerDelegate {
+    override init() {
+        super.init()
+        delegate = self
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        delegate = self
+    }
+
+    func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
+        properties props: UnsafePointer<NSLayoutManager.GlyphProperty>,
+        characterIndexes charIndexes: UnsafePointer<Int>,
+        font aFont: NSFont,
+        forGlyphRange glyphRange: NSRange
+    ) -> Int {
+        guard let textStorage else { return 0 }
+
+        var properties = Array(UnsafeBufferPointer(start: props, count: glyphRange.length))
+        for offset in 0..<glyphRange.length {
+            let characterIndex = charIndexes[offset]
+            guard characterIndex >= 0, characterIndex < textStorage.length else { continue }
+            let isCollapsedSyntax = (textStorage.attribute(
+                .currentCollapsedMarkdownSyntax,
+                at: characterIndex,
+                effectiveRange: nil
+            ) as? Bool) == true
+            let isHorizontalRuleMarker = (textStorage.attribute(
+                .currentHorizontalRuleMarker,
+                at: characterIndex,
+                effectiveRange: nil
+            ) as? Bool) == true
+            if isCollapsedSyntax && !isHorizontalRuleMarker {
+                properties[offset].insert(.null)
+            }
+        }
+
+        properties.withUnsafeBufferPointer { propertyBuffer in
+            guard let baseAddress = propertyBuffer.baseAddress else { return }
+            layoutManager.setGlyphs(
+                glyphs,
+                properties: baseAddress,
+                characterIndexes: charIndexes,
+                font: aFont,
+                forGlyphRange: glyphRange
+            )
+        }
+        return glyphRange.length
+    }
+
+    func layoutManager(
+        _ layoutManager: NSLayoutManager,
+        shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
+        lineFragmentUsedRect: UnsafeMutablePointer<NSRect>,
+        baselineOffset: UnsafeMutablePointer<CGFloat>,
+        in textContainer: NSTextContainer,
+        forGlyphRange glyphRange: NSRange
+    ) -> Bool {
+        guard let textStorage, glyphRange.length > 0 else { return true }
+
+        let characterRange = self.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let model = MarkdownEditorRenderModel(text: textStorage.string)
+        guard let ruleLineRange = Self.horizontalRuleLineRangeForDrawing(
+            model: model,
+            characterRange: characterRange
+        ) else {
+            return true
+        }
+
+        let paragraph = textStorage.attribute(
+            .paragraphStyle,
+            at: min(ruleLineRange.location, max(0, textStorage.length - 1)),
+            effectiveRange: nil
+        ) as? NSParagraphStyle
+        let lineHeight = max(
+            max(paragraph?.minimumLineHeight ?? 0, lineFragmentRect.pointee.height),
+            CurrentTheme.editorLineHeight(configuration: .default)
+        )
+        lineFragmentRect.pointee.size.height = lineHeight
+        lineFragmentUsedRect.pointee.size.height = lineHeight
+        return true
+    }
+
+    override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
+        super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
+        drawHorizontalRules(forGlyphRange: glyphsToShow, at: origin)
+    }
+
+    private func drawHorizontalRules(forGlyphRange glyphRange: NSRange, at origin: NSPoint) {
+        guard let textStorage, textStorage.length > 0 else { return }
+        let text = textStorage.string
+        let model = MarkdownEditorRenderModel(text: text)
+        let markdownStorage = textStorage as? MarkdownTextStorage
+        var drawnRuleLineLocations = Set<Int>()
+
+        enumerateLineFragments(forGlyphRange: glyphRange) { _, _, _, lineGlyphRange, _ in
+            let characterRange = self.characterRange(forGlyphRange: lineGlyphRange, actualGlyphRange: nil)
+            guard let ruleLineRange = Self.horizontalRuleLineRangeForDrawing(
+                model: model,
+                characterRange: characterRange
+            ) else { return }
+            guard drawnRuleLineLocations.insert(ruleLineRange.location).inserted else { return }
+            guard let displayState = model.horizontalRule(at: ruleLineRange.location),
+                  case .committedDivider(let horizontalRule) = displayState else {
+                return
+            }
+            guard markdownStorage?.horizontalRuleIsActive(horizontalRule) != true else { return }
+
+            let markerGlyphRange = self.glyphRange(
+                forCharacterRange: horizontalRule.markerRange,
+                actualCharacterRange: nil
+            )
+            guard markerGlyphRange.length > 0 else { return }
+
+            let lineRect = self.lineFragmentRect(forGlyphAt: markerGlyphRange.location, effectiveRange: nil)
+            let y = Self.horizontalRuleStrokeY(lineRect: lineRect, originY: origin.y)
+            let startX = origin.x + lineRect.minX
+            let endX = origin.x + lineRect.maxX
+            let path = NSBezierPath()
+            path.lineWidth = 1
+            path.move(to: NSPoint(x: startX, y: y))
+            path.line(to: NSPoint(x: endX, y: y))
+            CurrentTheme.dividerColor.setStroke()
+            path.stroke()
+        }
+    }
+
+    static func horizontalRuleLineRangeForDrawing(in text: String, characterRange: NSRange) -> NSRange? {
+        horizontalRuleLineRangeForDrawing(
+            model: MarkdownEditorRenderModel(text: text),
+            characterRange: characterRange
+        )
+    }
+
+    static func horizontalRuleLineRangeForDrawing(
+        model: MarkdownEditorRenderModel,
+        characterRange: NSRange
+    ) -> NSRange? {
+        let nsText = model.text as NSString
+        let fullRange = NSRange(location: 0, length: nsText.length)
+        let boundedRange = NSIntersectionRange(characterRange, fullRange)
+        guard boundedRange.length > 0 else { return nil }
+
+        let lineRange = nsText.lineRange(for: NSRange(location: boundedRange.location, length: 0))
+        guard NSIntersectionRange(lineRange, boundedRange).length > 0,
+              let displayState = model.horizontalRule(at: lineRange.location),
+              case .committedDivider(let horizontalRule) = displayState else {
+            return nil
+        }
+
+        return horizontalRule.lineRange
+    }
+
+    static func horizontalRuleStrokeY(lineRect: NSRect, originY: CGFloat) -> CGFloat {
+        floor(originY + lineRect.midY) + 0.5
+    }
+}
+
 final class MarkdownTextView: NSTextView {
     weak static var activeEditor: MarkdownTextView?
     private static var editorsByDayID: [String: WeakMarkdownTextView] = [:]
     var onFocus: (() -> Void)?
+    var configuration: CurrentConfiguration = .default
+    private var typingMarks = MarkdownTypingMarks()
     var currentDayID: String? {
         didSet {
             Self.unregister(oldValue, editor: self)
@@ -23,14 +186,22 @@ final class MarkdownTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        if let edit = inlineFormattingEdit(for: event, modifiers: modifiers),
-           apply(edit) {
+        if handleInlineFormattingShortcut(for: event, modifiers: modifiers) {
             return
         }
 
         switch event.keyCode {
         case 51 where modifiers.isEmpty:
+            if apply(MarkdownListEditing.emptyItemBackspaceEdit(in: string, selectedRange: selectedRange())) {
+                return
+            }
+            if apply(MarkdownBlockEditing.horizontalRuleBackspaceEdit(in: string, selectedRange: selectedRange())) {
+                return
+            }
             if apply(MarkdownBlockEditing.headingBackspaceEdit(in: string, selectedRange: selectedRange())) {
+                return
+            }
+            if apply(MarkdownInlineFormatting.backspaceEdit(in: string, selectedRange: selectedRange())) {
                 return
             }
         case 36 where modifiers == .command,
@@ -55,6 +226,73 @@ final class MarkdownTextView: NSTextView {
             break
         }
         super.keyDown(with: event)
+    }
+
+    override func doCommand(by commandSelector: Selector) {
+        if handleInlineFormattingCommand(commandSelector) {
+            return
+        }
+        super.doCommand(by: commandSelector)
+    }
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        guard let insertedText = Self.plainString(from: insertString),
+              replacementRange.length == 0,
+              !typingMarks.isEmpty,
+              !insertedText.isEmpty,
+              insertedText.rangeOfCharacter(from: .newlines) == nil else {
+            super.insertText(insertString, replacementRange: replacementRange)
+            return
+        }
+
+        let model = MarkdownEditorRenderModel(text: string)
+        if typingMarks.isSatisfied(by: model.inlineMarks(at: replacementRange.location)) {
+            super.insertText(insertString, replacementRange: replacementRange)
+            return
+        }
+
+        let wrapped = typingMarks.wrap(insertedText)
+        super.insertText(wrapped.replacement, replacementRange: replacementRange)
+        setSelectedRange(NSRange(location: replacementRange.location + wrapped.visibleOffset, length: 0))
+    }
+
+    override func selectionRange(
+        forProposedRange proposedCharRange: NSRange,
+        granularity: NSSelectionGranularity
+    ) -> NSRange {
+        let proposed = super.selectionRange(forProposedRange: proposedCharRange, granularity: granularity)
+        return MarkdownSelectionNormalization.normalizedVisibleSelection(in: string, selectedRange: proposed)
+    }
+
+    override func firstRect(forCharacterRange charRange: NSRange, actualRange: NSRangePointer?) -> NSRect {
+        if let rect = MarkdownVisibleCaret.firstRect(in: self, for: charRange) {
+            actualRange?.pointee = charRange
+            return rect
+        }
+        return super.firstRect(forCharacterRange: charRange, actualRange: actualRange)
+    }
+
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        if let adjustedRect = MarkdownVisibleCaret.insertionRect(in: self) {
+            super.drawInsertionPoint(in: adjustedRect, color: color, turnedOn: flag)
+            return
+        }
+        super.drawInsertionPoint(in: rect, color: color, turnedOn: flag)
+    }
+
+    @objc func toggleBoldface(_ sender: Any?) {
+        _ = applyInlineFormatting(kind: .bold)
+    }
+
+    @objc func toggleItalics(_ sender: Any?) {
+        _ = applyInlineFormatting(kind: .italic)
+    }
+
+    override func underline(_ sender: Any?) {
+        if applyInlineFormatting(kind: .underline) {
+            return
+        }
+        super.underline(sender)
     }
 
     override func paste(_ sender: Any?) {
@@ -95,33 +333,60 @@ final class MarkdownTextView: NSTextView {
         editorsByDayID = editorsByDayID.filter { $0.value.textView != nil }
     }
 
-    private func inlineFormattingEdit(
+    private func handleInlineFormattingShortcut(
         for event: NSEvent,
         modifiers: NSEvent.ModifierFlags
-    ) -> MarkdownListEditing.TextEdit? {
-        guard let key = event.charactersIgnoringModifiers?.lowercased() else { return nil }
-        let selection = selectedRange()
+    ) -> Bool {
+        guard let key = event.charactersIgnoringModifiers?.lowercased() else { return false }
 
         switch (key, modifiers) {
         case ("b", .command):
-            return MarkdownInlineFormatting.formattingEdit(kind: .bold, in: string, selectedRange: selection)
+            return applyInlineFormatting(kind: .bold)
         case ("i", .command):
-            return MarkdownInlineFormatting.formattingEdit(kind: .italic, in: string, selectedRange: selection)
+            return applyInlineFormatting(kind: .italic)
         case ("u", .command):
-            return MarkdownInlineFormatting.formattingEdit(kind: .underline, in: string, selectedRange: selection)
+            return applyInlineFormatting(kind: .underline)
         case ("s", [.command, .shift]):
-            return MarkdownInlineFormatting.formattingEdit(kind: .strikethrough, in: string, selectedRange: selection)
+            return applyInlineFormatting(kind: .strikethrough)
         case ("e", .command):
-            return MarkdownInlineFormatting.formattingEdit(kind: .inlineCode, in: string, selectedRange: selection)
+            return applyInlineFormatting(kind: .inlineCode)
         case ("k", .command):
-            return MarkdownInlineFormatting.linkEdit(
+            return apply(MarkdownInlineFormatting.linkEdit(
                 in: string,
-                selectedRange: selection,
+                selectedRange: selectedRange(),
                 urlString: NSPasteboard.general.string(forType: .string) ?? ""
-            )
+            ))
         default:
-            return nil
+            return false
         }
+    }
+
+    private func handleInlineFormattingCommand(_ commandSelector: Selector) -> Bool {
+        let kind: MarkdownInlineFormatting.Kind
+        switch NSStringFromSelector(commandSelector) {
+        case "toggleBoldface:":
+            kind = .bold
+        case "toggleItalics:":
+            kind = .italic
+        case "underline:":
+            kind = .underline
+        default:
+            return false
+        }
+
+        return applyInlineFormatting(kind: kind)
+    }
+
+    private func applyInlineFormatting(kind: MarkdownInlineFormatting.Kind) -> Bool {
+        let selection = selectedRange()
+        if selection.length == 0 {
+            typingMarks.toggle(kind)
+            setBaseTypingAttributes(typingAttributes)
+            return true
+        }
+
+        typingMarks = MarkdownTypingMarks()
+        return apply(MarkdownInlineFormatting.formattingEdit(kind: kind, in: string, selectedRange: selection))
     }
 
     private func apply(_ edit: MarkdownListEditing.TextEdit?) -> Bool {
@@ -129,6 +394,20 @@ final class MarkdownTextView: NSTextView {
         insertText(edit.replacement, replacementRange: edit.range)
         setSelectedRange(edit.selectedRangeAfterEdit)
         return true
+    }
+
+    func setBaseTypingAttributes(_ attributes: [NSAttributedString.Key: Any]) {
+        typingAttributes = typingMarks.applying(to: attributes, configuration: configuration)
+    }
+
+    private static func plainString(from insertString: Any) -> String? {
+        if let string = insertString as? String {
+            return string
+        }
+        if let attributedString = insertString as? NSAttributedString {
+            return attributedString.string
+        }
+        return nil
     }
 }
 
@@ -145,6 +424,28 @@ struct MarkdownEditorView: NSViewRepresentable {
     var minimumHeight: CGFloat = 72
     var onFocus: () -> Void = {}
 
+    nonisolated static func plainTypingAttributes(configuration: CurrentConfiguration) -> [NSAttributedString.Key: Any] {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
+        paragraph.maximumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
+        paragraph.lineBreakMode = .byWordWrapping
+
+        return [
+            .font: CurrentTheme.editorFont(configuration: configuration),
+            .foregroundColor: CurrentTheme.primaryTextColor,
+            .paragraphStyle: paragraph,
+            .baselineOffset: CurrentTheme.editorBaselineOffset,
+            .underlineStyle: 0,
+            .strikethroughStyle: 0,
+            .currentHorizontalRule: false,
+            .currentHorizontalRuleMarker: false,
+            .currentHiddenMarkdownSyntax: false,
+            .currentCollapsedMarkdownSyntax: false,
+            .spellingState: 0,
+            .backgroundColor: NSColor.clear
+        ]
+    }
+
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
     }
@@ -158,7 +459,14 @@ struct MarkdownEditorView: NSViewRepresentable {
         scrollView.autohidesScrollers = true
         scrollView.borderType = .noBorder
 
-        let textView = MarkdownTextView()
+        let textStorage = MarkdownTextStorage(string: text, configuration: configuration)
+        let layoutManager = MarkdownLayoutManager()
+        let textContainer = NSTextContainer(size: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+        textStorage.addLayoutManager(layoutManager)
+        layoutManager.addTextContainer(textContainer)
+
+        let textView = MarkdownTextView(frame: .zero, textContainer: textContainer)
+        textView.configuration = configuration
         textView.appearance = NSAppearance(named: .aqua)
         textView.delegate = context.coordinator
         textView.isRichText = false
@@ -169,6 +477,7 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
+        textView.isAutomaticTextCompletionEnabled = false
         textView.isAutomaticSpellingCorrectionEnabled = false
         textView.isAutomaticLinkDetectionEnabled = false
         textView.isAutomaticDataDetectionEnabled = false
@@ -198,12 +507,10 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.autoresizingMask = [.width]
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.minSize = NSSize(width: 0, height: 0)
-        textView.string = text
         textView.currentDayID = dayID
 
         context.coordinator.textView = textView
         context.coordinator.updateTypingAttributes(for: textView)
-        context.coordinator.highlighter.highlight(textView.textStorage!)
         scrollView.documentView = textView
 
         DispatchQueue.main.async {
@@ -212,6 +519,7 @@ struct MarkdownEditorView: NSViewRepresentable {
                 context.coordinator.didFocusInitially = true
                 textView.window?.makeFirstResponder(textView)
                 textView.setSelectedRange(NSRange(location: textView.string.utf16.count, length: 0))
+                (textView.textStorage as? MarkdownTextStorage)?.updateSelectedRange(textView.selectedRange())
                 textView.scrollRangeToVisible(textView.selectedRange())
             }
         }
@@ -222,7 +530,6 @@ struct MarkdownEditorView: NSViewRepresentable {
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let configurationChanged = context.coordinator.highlightedConfiguration != configuration
         context.coordinator.parent = self
-        context.coordinator.highlighter.update(configuration: configuration)
         guard let textView = scrollView.documentView as? MarkdownTextView else { return }
         let textChanged = !context.coordinator.isUpdatingFromTextView && textView.string != text
         let widthChanged = abs(context.coordinator.lastMeasuredWidth - scrollView.contentSize.width) > 1
@@ -240,6 +547,8 @@ struct MarkdownEditorView: NSViewRepresentable {
         textView.insertionPointColor = CurrentTheme.primaryTextColor
         textView.textColor = CurrentTheme.primaryTextColor
         if configurationChanged {
+            textView.configuration = configuration
+            (textView.textStorage as? MarkdownTextStorage)?.configuration = configuration
             context.coordinator.updateTypingAttributes(for: textView)
         }
 
@@ -248,11 +557,12 @@ struct MarkdownEditorView: NSViewRepresentable {
             let selection = textView.selectedRange()
             textView.string = text
             textView.setSelectedRange(selection.location <= textView.string.utf16.count ? selection : NSRange(location: textView.string.utf16.count, length: 0))
-            context.coordinator.highlighter.highlight(textView.textStorage!)
+            (textView.textStorage as? MarkdownTextStorage)?.updateSelectedRange(textView.selectedRange())
+            (textView.textStorage as? MarkdownTextStorage)?.applyDecorations()
             context.coordinator.highlightedConfiguration = configuration
             context.coordinator.isUpdatingFromSwiftUI = false
         } else if configurationChanged {
-            context.coordinator.highlighter.highlight(textView.textStorage!)
+            (textView.textStorage as? MarkdownTextStorage)?.applyDecorations()
             context.coordinator.highlightedConfiguration = configuration
         }
 
@@ -264,17 +574,16 @@ struct MarkdownEditorView: NSViewRepresentable {
     @MainActor
     final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MarkdownEditorView
-        let highlighter: MarkdownSyntaxHighlighter
         weak var textView: MarkdownTextView?
         var isUpdatingFromSwiftUI = false
         var isUpdatingFromTextView = false
         var didFocusInitially = false
         var highlightedConfiguration: CurrentConfiguration
         var lastMeasuredWidth: CGFloat = 0
+        private var isNormalizingSelection = false
 
         init(_ parent: MarkdownEditorView) {
             self.parent = parent
-            self.highlighter = MarkdownSyntaxHighlighter(configuration: parent.configuration)
             self.highlightedConfiguration = parent.configuration
         }
 
@@ -282,17 +591,25 @@ struct MarkdownEditorView: NSViewRepresentable {
             guard let textView = notification.object as? MarkdownTextView else { return }
             MarkdownTextView.activeEditor = textView
             parent.onFocus()
-            clearTemporaryDecorations(for: textView)
+            (textView.textStorage as? MarkdownTextStorage)?.updateSelectedRange(textView.selectedRange())
             updateTypingAttributes(for: textView)
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            guard let textView = notification.object as? MarkdownTextView else { return }
+            (textView.textStorage as? MarkdownTextStorage)?.updateSelectedRange(nil)
+            if let scrollView = textView.enclosingScrollView {
+                remeasure(in: scrollView)
+            }
         }
 
         func textDidChange(_ notification: Notification) {
             guard !isUpdatingFromSwiftUI,
                   let textView = notification.object as? MarkdownTextView else { return }
             isUpdatingFromTextView = true
-            highlighter.highlight(textView.textStorage!)
             highlightedConfiguration = parent.configuration
             updateTypingAttributes(for: textView)
+            (textView.textStorage as? MarkdownTextStorage)?.updateSelectedRange(textView.selectedRange())
             parent.text = textView.string
             isUpdatingFromTextView = false
             if let scrollView = textView.enclosingScrollView {
@@ -302,7 +619,23 @@ struct MarkdownEditorView: NSViewRepresentable {
 
         func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? MarkdownTextView else { return }
+            if !isNormalizingSelection {
+                let selection = textView.selectedRange()
+                let normalizedSelection = MarkdownSelectionNormalization.normalizedVisibleSelection(
+                    in: textView.string,
+                    selectedRange: selection
+                )
+                if normalizedSelection != selection {
+                    isNormalizingSelection = true
+                    textView.setSelectedRange(normalizedSelection)
+                    isNormalizingSelection = false
+                }
+            }
             updateTypingAttributes(for: textView)
+            (textView.textStorage as? MarkdownTextStorage)?.updateSelectedRange(textView.selectedRange())
+            if let scrollView = textView.enclosingScrollView {
+                remeasure(in: scrollView)
+            }
         }
 
         func remeasure(in scrollView: NSScrollView) {
@@ -321,44 +654,30 @@ struct MarkdownEditorView: NSViewRepresentable {
         }
 
         func updateTypingAttributes(for textView: NSTextView) {
-            let paragraph = NSMutableParagraphStyle()
-            paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: parent.configuration)
-            paragraph.maximumLineHeight = CurrentTheme.editorLineHeight(configuration: parent.configuration)
-            paragraph.lineBreakMode = .byWordWrapping
-
-            var attributes: [NSAttributedString.Key: Any] = [
-                .font: CurrentTheme.editorFont(configuration: parent.configuration),
-                .foregroundColor: CurrentTheme.primaryTextColor,
-                .paragraphStyle: paragraph,
-                .baselineOffset: CurrentTheme.editorBaselineOffset,
-                .underlineStyle: 0,
-                .strikethroughStyle: 0,
-                .backgroundColor: NSColor.clear
-            ]
+            var attributes = MarkdownEditorView.plainTypingAttributes(configuration: parent.configuration)
 
             let selection = textView.selectedRange()
+            let model = MarkdownEditorRenderModel(text: textView.string)
             if selection.length == 0,
-               let heading = MarkdownBlockRendering.headingLine(in: textView.string, at: selection.location),
+               let heading = model.heading(at: selection.location),
                selection.location >= heading.contentRange.location {
+                let paragraph = NSMutableParagraphStyle()
                 paragraph.minimumLineHeight = CurrentTheme.editorHeadingLineHeight(level: heading.level, configuration: parent.configuration)
                 paragraph.maximumLineHeight = CurrentTheme.editorHeadingLineHeight(level: heading.level, configuration: parent.configuration)
+                paragraph.lineBreakMode = .byWordWrapping
                 paragraph.paragraphSpacingBefore = CurrentTheme.editorHeadingSpacingBefore(level: heading.level)
                 paragraph.paragraphSpacing = CurrentTheme.editorHeadingSpacingAfter(level: heading.level)
                 attributes[.font] = CurrentTheme.editorHeadingFont(level: heading.level, configuration: parent.configuration)
                 attributes[.paragraphStyle] = paragraph
             }
 
-            textView.typingAttributes = attributes
-        }
-
-        private func clearTemporaryDecorations(for textView: NSTextView) {
-            guard let textStorage = textView.textStorage else { return }
-            highlighter.clearTemporaryDecorations(textStorage)
-            if textStorage.length > 0 {
-                textView.layoutManager?.invalidateDisplay(
-                    forCharacterRange: NSRange(location: 0, length: textStorage.length)
-                )
+            if let markdownTextView = textView as? MarkdownTextView {
+                markdownTextView.configuration = parent.configuration
+                markdownTextView.setBaseTypingAttributes(attributes)
+            } else {
+                textView.typingAttributes = attributes
             }
         }
+
     }
 }

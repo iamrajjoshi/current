@@ -31,15 +31,28 @@ struct CurrentFeatureChecks {
         try rowHeightCalculatorKeepsTodayExpandedWhenMinimized()
         try rowHeightCalculatorUsesLargeMinimumForEmptyToday()
         try rowHeightCalculatorGrowsForMultilineText()
+        try rowHeightCalculatorUsesRenderedMarkdownMetrics()
         try timelineLayoutMetricsCenterTheWritingColumn()
         try timelineLayoutMetricsPreventWideViewportWrapping()
         try markdownListEditingContinuesCommonLists()
+        try markdownListBackspaceExitsEmptyItems()
         try markdownTaskEditingTogglesCurrentLine()
         try markdownInlineFormattingWrapsSelectedText()
-        try markdownInlineFormattingInsertsEmptyPairs()
+        try markdownInlineFormattingLeavesCollapsedSelectionToTypingMarks()
+        try markdownInlineFormattingUsesModifierSetSemantics()
+        try markdownInlineFormattingExcludesStructuralListPrefixes()
+        try markdownInlineFormattingExcludesStructuralHeadingPrefixes()
+        try markdownInlineFormattingPreservesComposedCharacters()
         try markdownInlineFormattingLinksSelectedTextWithClipboardURL()
+        try markdownInlineRenderingFindsHiddenSyntaxRanges()
+        try markdownRenderedContentIgnoresEmptyStructuralMarkers()
         try markdownHeadingRenderingTracksNotionLikeShortcuts()
+        try markdownHeadingSelectionKeepsCollapsedCaretsForLiveMode()
         try markdownHeadingBackspaceExitsBlock()
+        try markdownHorizontalRuleRenderingTracksShortcuts()
+        try markdownHorizontalRuleDisplayStateTracksCommittedLines()
+        try markdownHorizontalRuleBackspaceExitsBlock()
+        try markdownInlineBackspaceHandlesHiddenMarkers()
         try await autosaveWritesOnlyTheEditedDay()
         try rolloverCreatesANewTodayAndKeepsHistoryVisible()
         try streamStoreDetectsExternalConflictsBeforeOverwrite()
@@ -106,7 +119,7 @@ struct CurrentFeatureChecks {
         try check(configuration.historyWindowDays == 90, "history-window-days did not parse")
         try check(configuration.autosaveDelay == 1.25, "autosave-delay did not parse")
         try check(configuration.hideEmptyWeekends == true, "hide-empty-weekends did not parse")
-        try check(configuration.markdownMarkerVisibility == .muted, "markdown-marker-visibility did not parse")
+        try check(configuration.markdownMarkerVisibility == .hidden, "muted marker visibility should parse as hidden")
         try check(store.diagnostics.count == 2, "Expected diagnostics for unknown and malformed lines")
     }
 
@@ -124,7 +137,7 @@ struct CurrentFeatureChecks {
             hide-empty-weekends = yes
             hide-empty-weekends = maybe
             hide-empty-weekends =
-            markdown-marker-visibility = hidden
+            markdown-marker-visibility = visible
             """
         )
         let configuration = store.configuration
@@ -134,7 +147,7 @@ struct CurrentFeatureChecks {
         try check(configuration.recentDays == 3, "Invalid recent-days should keep the last valid value")
         try check(configuration.contentWidth == CurrentConfiguration.default.contentWidth, "Empty content-width should reset to default")
         try check(configuration.hideEmptyWeekends == CurrentConfiguration.default.hideEmptyWeekends, "Empty hide-empty-weekends should reset to default")
-        try check(configuration.markdownMarkerVisibility == .muted, "Invalid marker visibility should keep the default")
+        try check(configuration.markdownMarkerVisibility == .hidden, "Invalid marker visibility should keep the default")
         try check(store.diagnostics.count == 4, "Expected diagnostics for invalid numeric, boolean, and marker values")
     }
 
@@ -211,7 +224,7 @@ struct CurrentFeatureChecks {
         try check(text.contains("# Current configuration"), "Editable template should contain commented defaults")
         try check(text.contains("# library-root = ~/Documents/current"), "Editable template should document the library root")
         try check(text.contains("# hide-empty-weekends = false"), "Editable template should document weekend hiding")
-        try check(text.contains("# markdown-marker-visibility = muted"), "Editable template should document marker visibility")
+        try check(text.contains("# markdown-marker-visibility = hidden"), "Editable template should document marker visibility")
         try check(CurrentConfigurationStore(locations: locations, homeDirectory: home).diagnostics.isEmpty, "Comment-only template should parse cleanly")
     }
 
@@ -727,10 +740,16 @@ struct CurrentFeatureChecks {
         let calendar = fixedCalendar()
         let date = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29)))
         let document = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today.md"), text: "")
+        let emptyHeading = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today-heading.md"), text: "## ")
+        let firstLetter = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today-first-letter.md"), text: "A")
 
         let height = TimelineRowHeightCalculator.height(for: document, isToday: true, width: 700)
+        let emptyHeadingHeight = TimelineRowHeightCalculator.height(for: emptyHeading, isToday: true, width: 700)
+        let firstLetterHeight = TimelineRowHeightCalculator.height(for: firstLetter, isToday: true, width: 700)
 
         try check(height >= 320, "Today empty row should reserve the large editor minimum")
+        try check(emptyHeadingHeight == height, "Empty heading markers should keep the same Today breathing room as an empty note")
+        try check(firstLetterHeight == height, "Typing the first letter should not shrink Today's editor")
     }
 
     static func rowHeightCalculatorGrowsForMultilineText() throws {
@@ -748,6 +767,63 @@ struct CurrentFeatureChecks {
         let multilineHeight = TimelineRowHeightCalculator.height(for: multiline, isToday: false, width: 700)
 
         try check(multilineHeight > shortHeight, "Multiline note height should increase deterministically")
+    }
+
+    static func rowHeightCalculatorUsesRenderedMarkdownMetrics() throws {
+        let plainHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: "Heading",
+            width: 700,
+            minimumHeight: 0
+        )
+        let headingHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: "# Heading",
+            width: 700,
+            minimumHeight: 0
+        )
+        let wrappedPlainHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: String(repeating: "x", count: 10),
+            width: 80,
+            minimumHeight: 0
+        )
+        let wrappedHiddenSyntaxHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: "**\(String(repeating: "x", count: 10))**",
+            width: 80,
+            minimumHeight: 0
+        )
+        let horizontalRuleHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: "Before\n---\nAfter",
+            width: 700,
+            minimumHeight: 0
+        )
+        let committedRuleHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: "---\n",
+            width: 700,
+            minimumHeight: 0
+        )
+        let typingNextLineHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: "---\nA",
+            width: 700,
+            minimumHeight: 0
+        )
+        let threeLineHeight = TimelineRowHeightCalculator.measuredEditorHeight(
+            text: "Before\n \nAfter",
+            width: 700,
+            minimumHeight: 0
+        )
+
+        try check(headingHeight > plainHeight, "Heading Markdown should measure with rendered heading metrics")
+        try check(
+            wrappedHiddenSyntaxHeight == wrappedPlainHeight,
+            "Hidden inline markers should not add wrapping height"
+        )
+        try check(
+            abs(horizontalRuleHeight - threeLineHeight) <= 1,
+            "Horizontal rules should measure as rendered divider lines instead of visible marker text"
+        )
+        try check(
+            abs(committedRuleHeight - typingNextLineHeight) <= 1,
+            "Typing on the line after a committed divider should not remeasure the divider block"
+        )
     }
 
     static func timelineLayoutMetricsCenterTheWritingColumn() throws {
@@ -810,6 +886,56 @@ struct CurrentFeatureChecks {
         try check(fencedEdit == nil, "Lists should not auto-continue inside fenced code")
     }
 
+    static func markdownListBackspaceExitsEmptyItems() throws {
+        let bullet = try require(MarkdownListEditing.emptyItemBackspaceEdit(
+            in: "- ",
+            selectedRange: NSRange(location: 2, length: 0)
+        ))
+        try check(bullet.range == NSRange(location: 0, length: 2), "Backspace should remove empty bullet marker")
+        try check(bullet.replacement == "", "Backspace should exit empty bullet item")
+        try check(bullet.selectedRangeAfterEdit == NSRange(location: 0, length: 0), "Cursor should return to the list line start")
+
+        let ordered = try require(MarkdownListEditing.emptyItemBackspaceEdit(
+            in: "1. ",
+            selectedRange: NSRange(location: 3, length: 0)
+        ))
+        try check(ordered.range == NSRange(location: 0, length: 3), "Backspace should remove empty ordered marker")
+
+        let task = try require(MarkdownListEditing.emptyItemBackspaceEdit(
+            in: "- [ ] ",
+            selectedRange: NSRange(location: 6, length: 0)
+        ))
+        try check(task.range == NSRange(location: 0, length: 6), "Backspace should remove empty task marker")
+
+        let orderedTask = try require(MarkdownListEditing.emptyItemBackspaceEdit(
+            in: "1. [x] ",
+            selectedRange: NSRange(location: 7, length: 0)
+        ))
+        try check(orderedTask.range == NSRange(location: 0, length: 7), "Backspace should remove empty ordered task marker")
+
+        let indentedText = "Before\n  - \nAfter"
+        let indented = try require(MarkdownListEditing.emptyItemBackspaceEdit(
+            in: indentedText,
+            selectedRange: NSRange(location: "Before\n  - ".utf16.count, length: 0)
+        ))
+        try check(indented.range == NSRange(location: "Before\n".utf16.count, length: "  - ".utf16.count), "Backspace should remove only the current empty indented item")
+
+        try check(MarkdownListEditing.emptyItemBackspaceEdit(
+            in: "- item",
+            selectedRange: NSRange(location: 2, length: 0)
+        ) == nil, "Backspace should not exit non-empty bullet items")
+        try check(MarkdownListEditing.emptyItemBackspaceEdit(
+            in: "1. item",
+            selectedRange: NSRange(location: 3, length: 0)
+        ) == nil, "Backspace should not exit non-empty ordered items")
+
+        let fenced = "```\n- \n```"
+        try check(MarkdownListEditing.emptyItemBackspaceEdit(
+            in: fenced,
+            selectedRange: NSRange(location: "```\n- ".utf16.count, length: 0)
+        ) == nil, "Backspace should not exit lists inside fenced code")
+    }
+
     static func markdownTaskEditingTogglesCurrentLine() throws {
         let unchecked = "- [ ] Follow up"
         let uncheckedEdit = try require(MarkdownListEditing.taskToggleEdit(
@@ -843,23 +969,21 @@ struct CurrentFeatureChecks {
 
     static func markdownInlineFormattingWrapsSelectedText() throws {
         try checkInlineFormatting(kind: .bold, markerOpen: "**", markerClose: "**")
-        try checkInlineFormatting(kind: .italic, markerOpen: "*", markerClose: "*")
+        try checkInlineFormatting(kind: .italic, markerOpen: "_", markerClose: "_")
         try checkInlineFormatting(kind: .underline, markerOpen: "<u>", markerClose: "</u>")
         try checkInlineFormatting(kind: .strikethrough, markerOpen: "~~", markerClose: "~~")
         try checkInlineFormatting(kind: .inlineCode, markerOpen: "`", markerClose: "`")
     }
 
-    static func markdownInlineFormattingInsertsEmptyPairs() throws {
+    static func markdownInlineFormattingLeavesCollapsedSelectionToTypingMarks() throws {
         let text = "One two"
-        let edit = try require(MarkdownInlineFormatting.formattingEdit(
+        let edit = MarkdownInlineFormatting.formattingEdit(
             kind: .underline,
             in: text,
             selectedRange: NSRange(location: 3, length: 0)
-        ))
+        )
 
-        try check(edit.range == NSRange(location: 3, length: 0), "Empty formatting should insert at the cursor")
-        try check(edit.replacement == "<u></u>", "Underline empty insertion should use HTML markers")
-        try check(edit.selectedRangeAfterEdit == NSRange(location: 6, length: 0), "Cursor should land inside inserted underline markers")
+        try check(edit == nil, "Collapsed formatting should be handled as pending typing marks, not empty marker insertion")
     }
 
     static func markdownInlineFormattingLinksSelectedTextWithClipboardURL() throws {
@@ -894,6 +1018,153 @@ struct CurrentFeatureChecks {
         )
     }
 
+    static func markdownInlineFormattingUsesModifierSetSemantics() throws {
+        let bold = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: "Format me",
+            selectedRange: NSRange(location: 7, length: 2)
+        ))
+        try check(bold.range == NSRange(location: 0, length: 9), "Formatting should rewrite the affected line")
+        try check(bold.replacement == "Format **me**", "Bold should wrap selected text once")
+        try check(bold.selectedRangeAfterEdit == NSRange(location: 9, length: 2), "Selection should stay on visible bold text")
+
+        let unbold = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: bold.replacement,
+            selectedRange: bold.selectedRangeAfterEdit
+        ))
+        try check(unbold.replacement == "Format me", "Applying bold again should remove bold instead of adding markers")
+        try check(unbold.selectedRangeAfterEdit == NSRange(location: 7, length: 2), "Unbold should keep the visible text selected")
+
+        let collapsedBold = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: "3. ****item****",
+            selectedRange: NSRange(location: 7, length: 4)
+        ))
+        try check(collapsedBold.replacement == "3. item", "Repeated same-kind markers should collapse when toggled")
+
+        let underlineBold = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .underline,
+            in: "**me**",
+            selectedRange: NSRange(location: 2, length: 2)
+        ))
+        try check(underlineBold.replacement == "**<u>me</u>**", "Different modifiers should be additive")
+
+        let removeBoldOnly = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: "**<u>me</u>**",
+            selectedRange: NSRange(location: 5, length: 2)
+        ))
+        try check(removeBoldOnly.replacement == "<u>me</u>", "Removing bold should preserve underline")
+
+        let codeClearsMarks = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .inlineCode,
+            in: "**<u>me</u>**",
+            selectedRange: NSRange(location: 5, length: 2)
+        ))
+        try check(codeClearsMarks.replacement == "`me`", "Inline code should replace text marks")
+
+        let textMarkInsideCode = MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: "`me`",
+            selectedRange: NSRange(location: 1, length: 2)
+        )
+        try check(textMarkInsideCode == nil, "Text marks should not apply inside inline code")
+    }
+
+    static func markdownInlineFormattingExcludesStructuralListPrefixes() throws {
+        let ordered = "3. item"
+        let normalized = MarkdownSelectionNormalization.normalizedVisibleSelection(
+            in: ordered,
+            selectedRange: NSRange(location: 0, length: ordered.utf16.count)
+        )
+        try check(normalized == NSRange(location: 3, length: 4), "Single-line selection should exclude ordered-list prefix")
+
+        let orderedBold = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: ordered,
+            selectedRange: NSRange(location: 0, length: ordered.utf16.count)
+        ))
+        try check(orderedBold.replacement == "3. **item**", "Formatting should preserve ordered-list prefix outside markers")
+        try check(orderedBold.selectedRangeAfterEdit == NSRange(location: 5, length: 4), "Selection should stay on list item text")
+
+        let task = "- [ ] item"
+        let taskBold = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: task,
+            selectedRange: NSRange(location: 0, length: task.utf16.count)
+        ))
+        try check(taskBold.replacement == "- [ ] **item**", "Formatting should preserve task-list prefix outside markers")
+
+        let multiline = "1. one\n2. two"
+        let multilineBold = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: multiline,
+            selectedRange: NSRange(location: 0, length: multiline.utf16.count)
+        ))
+        try check(multilineBold.replacement == "1. **one**\n2. **two**", "Multiline formatting should preserve each list prefix outside markers")
+    }
+
+    static func markdownInlineFormattingExcludesStructuralHeadingPrefixes() throws {
+        let heading = "## Heading"
+        let boldHeading = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: heading,
+            selectedRange: NSRange(location: 0, length: heading.utf16.count)
+        ))
+        try check(boldHeading.replacement == "## **Heading**", "Formatting should preserve heading prefix outside markers")
+        try check(boldHeading.selectedRangeAfterEdit == NSRange(location: 5, length: 7), "Selection should stay on heading text")
+    }
+
+    static func markdownInlineFormattingPreservesComposedCharacters() throws {
+        let text = "Hi 👨‍👩‍👧‍👦 cafe\u{301}"
+        let nsText = text as NSString
+        let emojiRange = nsText.range(of: "👨‍👩‍👧‍👦")
+        let accentRange = nsText.range(of: "e\u{301}")
+
+        let emojiBold = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .bold,
+            in: text,
+            selectedRange: emojiRange
+        ))
+        try check(emojiBold.replacement == "Hi **👨‍👩‍👧‍👦** cafe\u{301}", "Formatting should preserve multi-scalar emoji")
+        try check(emojiBold.selectedRangeAfterEdit == NSRange(location: emojiRange.location + 2, length: emojiRange.length), "Emoji selection should keep the composed character selected")
+
+        let accentItalic = try require(MarkdownInlineFormatting.formattingEdit(
+            kind: .italic,
+            in: text,
+            selectedRange: accentRange
+        ))
+        try check(accentItalic.replacement == "Hi 👨‍👩‍👧‍👦 caf_e\u{301}_", "Formatting should preserve composed accented characters")
+        try check(accentItalic.selectedRangeAfterEdit == NSRange(location: accentRange.location + 1, length: accentRange.length), "Accent selection should keep the composed character selected")
+    }
+
+    static func markdownInlineRenderingFindsHiddenSyntaxRanges() throws {
+        let text = "A **bold** and <u>under</u> and [site](https://example.com)"
+        let spans = MarkdownInlineRendering.spans(in: text)
+
+        let bold = try require(spans.first { $0.kind == .bold }, "Expected bold span")
+        try check((text as NSString).substring(with: bold.contentRange) == "bold", "Bold content range should exclude markers")
+        try check(bold.syntaxRanges == [
+            NSRange(location: 2, length: 2),
+            NSRange(location: 8, length: 2)
+        ], "Bold syntax ranges should track both marker pairs")
+
+        let underline = try require(spans.first { $0.kind == .underline }, "Expected underline span")
+        try check((text as NSString).substring(with: underline.contentRange) == "under", "Underline content should exclude tags")
+
+        let link = try require(spans.first { $0.kind == .link }, "Expected link span")
+        try check((text as NSString).substring(with: link.contentRange) == "site", "Link content should be visible text only")
+        try check(link.syntaxRanges.count == 2, "Link should hide the opening bracket and destination syntax")
+
+        let nestedText = "**_important_**"
+        let nestedSpans = MarkdownInlineRendering.spans(in: nestedText)
+        let nestedBold = try require(nestedSpans.first { $0.kind == .bold }, "Expected nested bold span")
+        let nestedItalic = try require(nestedSpans.first { $0.kind == .italic }, "Expected nested italic span")
+        try check((nestedText as NSString).substring(with: nestedBold.contentRange) == "_important_", "Outer nested span should preserve its content range")
+        try check((nestedText as NSString).substring(with: nestedItalic.contentRange) == "important", "Inner nested span should be parsed instead of rejected")
+    }
+
     static func checkContinuation(_ text: String, replacement: String) throws {
         let edit = try require(MarkdownListEditing.continuationEdit(
             in: text,
@@ -915,8 +1186,8 @@ struct CurrentFeatureChecks {
             selectedRange: NSRange(location: 7, length: 2)
         ))
 
-        try check(edit.range == NSRange(location: 7, length: 2), "Inline formatting should replace the selected range")
-        try check(edit.replacement == "\(markerOpen)me\(markerClose)", "Unexpected inline formatting replacement")
+        try check(edit.range == NSRange(location: 0, length: text.utf16.count), "Inline formatting should rewrite the affected line")
+        try check(edit.replacement == "Format \(markerOpen)me\(markerClose)", "Unexpected inline formatting replacement")
         try check(
             edit.selectedRangeAfterEdit == NSRange(location: 7 + markerOpen.utf16.count, length: 2),
             "Inline formatting should keep the original content selected inside the markers"
@@ -940,6 +1211,38 @@ struct CurrentFeatureChecks {
         try check(fencedHeading == nil, "Headings should not render inside fenced code")
     }
 
+    static func markdownHeadingSelectionKeepsCollapsedCaretsForLiveMode() throws {
+        try check(
+            MarkdownSelectionNormalization.normalizedVisibleSelection(
+                in: "## Heading",
+                selectedRange: NSRange(location: 0, length: 0)
+            ) == NSRange(location: 0, length: 0),
+            "Live mode should keep collapsed carets inside revealed heading markers"
+        )
+        try check(
+            MarkdownSelectionNormalization.normalizedVisibleSelection(
+                in: "## Heading",
+                selectedRange: NSRange(location: 2, length: 0)
+            ) == NSRange(location: 2, length: 0),
+            "Live mode should keep collapsed carets inside heading whitespace"
+        )
+        try check(
+            MarkdownSelectionNormalization.normalizedVisibleSelection(
+                in: "## Heading",
+                selectedRange: NSRange(location: 3, length: 0)
+            ) == NSRange(location: 3, length: 0),
+            "Carets already at visible heading text should stay put"
+        )
+    }
+
+    static func markdownRenderedContentIgnoresEmptyStructuralMarkers() throws {
+        try check(MarkdownBlockRendering.hasRenderedContent(in: "#"), "A bare heading marker should count as rendered text")
+        try check(!MarkdownBlockRendering.hasRenderedContent(in: "## "), "An empty H2 block should not count as rendered content")
+        try check(MarkdownBlockRendering.hasRenderedContent(in: "- [ ]"), "An incomplete task marker should count as rendered text")
+        try check(MarkdownBlockRendering.hasRenderedContent(in: "## Title"), "Heading text should count as rendered content")
+        try check(MarkdownBlockRendering.hasRenderedContent(in: "---"), "A rendered horizontal rule should count as content")
+    }
+
     static func markdownHeadingBackspaceExitsBlock() throws {
         let emptyEdit = try require(MarkdownBlockEditing.headingBackspaceEdit(
             in: "# ",
@@ -955,11 +1258,101 @@ struct CurrentFeatureChecks {
         ))
         try check(titledEdit.range == NSRange(location: 0, length: 3), "Backspace at heading content start should remove the prefix")
 
+        let visibleStartEdit = try require(MarkdownBlockEditing.headingBackspaceEdit(
+            in: "## Title",
+            selectedRange: NSRange(location: 0, length: 0)
+        ))
+        try check(visibleStartEdit.range == NSRange(location: 0, length: 3), "Backspace at visible heading start should remove the hidden prefix")
+
         let midContentEdit = MarkdownBlockEditing.headingBackspaceEdit(
             in: "## Title",
             selectedRange: NSRange(location: 5, length: 0)
         )
         try check(midContentEdit == nil, "Backspace inside heading content should keep normal character deletion")
+    }
+
+    static func markdownHorizontalRuleRenderingTracksShortcuts() throws {
+        let rule = try require(MarkdownBlockRendering.horizontalRuleLine(in: "---", at: 3))
+        try check(rule.markerRange == NSRange(location: 0, length: 3), "A standalone --- should parse as a horizontal rule marker")
+
+        let spacedRule = try require(MarkdownBlockRendering.horizontalRuleLine(in: "  * * *  ", at: 5))
+        try check(spacedRule.markerRange == NSRange(location: 0, length: 9), "Spaced rule markers should be included in the hidden range")
+
+        let fenced = "```\n---\n```"
+        let fencedRule = MarkdownBlockRendering.horizontalRuleLine(in: fenced, at: 5)
+        try check(fencedRule == nil, "Horizontal rules should not render inside fenced code")
+    }
+
+    static func markdownHorizontalRuleDisplayStateTracksCommittedLines() throws {
+        let editing = try require(MarkdownBlockRendering.horizontalRuleDisplayState(in: "---", at: 3))
+        switch editing {
+        case .editingMarker(let rule):
+            try check(rule.markerRange == NSRange(location: 0, length: 3), "EOF --- should stay an editable marker until Return")
+        case .committedDivider:
+            throw CheckFailure("EOF --- should not be committed before Return")
+        }
+
+        let committed = try require(MarkdownBlockRendering.horizontalRuleDisplayState(in: "---\n", at: 3))
+        switch committed {
+        case .committedDivider(let rule):
+            try check(rule.lineRange == NSRange(location: 0, length: 4), "Return should commit --- into a divider line")
+        case .editingMarker:
+            throw CheckFailure("--- followed by a newline should be a committed divider")
+        }
+
+        let typingAfterCommitted = try require(MarkdownBlockRendering.horizontalRuleDisplayState(in: "---\nA", at: 0))
+        switch typingAfterCommitted {
+        case .committedDivider(let rule):
+            try check(rule.lineRange == NSRange(location: 0, length: 4), "Typing after Return should keep the original divider line committed")
+        case .editingMarker:
+            throw CheckFailure("Typing after a committed divider should not make the divider editable again")
+        }
+    }
+
+    static func markdownHorizontalRuleBackspaceExitsBlock() throws {
+        let edit = try require(MarkdownBlockEditing.horizontalRuleBackspaceEdit(
+            in: "Before\n---\nAfter",
+            selectedRange: NSRange(location: "Before\n---".utf16.count, length: 0)
+        ))
+
+        try check(edit.range == NSRange(location: "Before\n".utf16.count, length: 3), "Backspace on a rule should remove the marker text")
+        try check(edit.replacement == "", "Rule backspace should leave an empty line")
+        try check(edit.selectedRangeAfterEdit == NSRange(location: "Before\n".utf16.count, length: 0), "Cursor should return to the rule line start")
+
+        let committedStartEdit = try require(MarkdownBlockEditing.horizontalRuleBackspaceEdit(
+            in: "---\n",
+            selectedRange: NSRange(location: 0, length: 0)
+        ))
+        try check(committedStartEdit.range == NSRange(location: 0, length: 3), "Backspace at committed rule start should remove the hidden marker")
+
+        let uncommittedEndEdit = MarkdownBlockEditing.horizontalRuleBackspaceEdit(
+            in: "---",
+            selectedRange: NSRange(location: 3, length: 0)
+        )
+        try check(uncommittedEndEdit == nil, "Backspace at visible EOF --- should fall through to normal character deletion")
+    }
+
+    static func markdownInlineBackspaceHandlesHiddenMarkers() throws {
+        let unwrap = try require(MarkdownInlineFormatting.backspaceEdit(
+            in: "**Bold**",
+            selectedRange: NSRange(location: 2, length: 0)
+        ))
+        try check(unwrap.range == NSRange(location: 0, length: 8), "Backspace at visible content start should unwrap formatting")
+        try check(unwrap.replacement == "Bold", "Unwrapping should preserve visible content")
+
+        let trailingDelete = try require(MarkdownInlineFormatting.backspaceEdit(
+            in: "**Bold**",
+            selectedRange: NSRange(location: 8, length: 0)
+        ))
+        try check(trailingDelete.range == NSRange(location: 5, length: 1), "Backspace after hidden closing marker should delete the previous visible character")
+        try check(trailingDelete.replacement == "", "Trailing hidden marker backspace should delete one visible character")
+
+        let emptyWrapper = try require(MarkdownInlineFormatting.backspaceEdit(
+            in: "<u></u>",
+            selectedRange: NSRange(location: 3, length: 0)
+        ))
+        try check(emptyWrapper.range == NSRange(location: 0, length: 7), "Backspace inside an empty wrapper should remove both tags")
+        try check(emptyWrapper.replacement == "", "Empty wrapper deletion should leave no text")
     }
 
     @MainActor
