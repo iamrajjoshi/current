@@ -42,6 +42,33 @@ public enum MarkdownListEditing {
         )
     }
 
+    public static func emptyItemBackspaceEdit(in text: String, selectedRange: NSRange) -> TextEdit? {
+        guard selectedRange.length == 0 else { return nil }
+        let nsText = text as NSString
+        guard selectedRange.location <= nsText.length else { return nil }
+        guard !isInsideFencedCodeBlock(nsText, location: selectedRange.location) else { return nil }
+
+        let lineRange = nsText.lineRange(for: NSRange(location: selectedRange.location, length: 0))
+        let lineBodyRange = lineBodyRange(from: lineRange, in: nsText)
+        let line = nsText.substring(with: lineBodyRange)
+        guard let marker = marker(in: line),
+              marker.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+
+        let cursor = selectedRange.location
+        guard cursor >= lineBodyRange.location,
+              cursor <= NSMaxRange(lineBodyRange) else {
+            return nil
+        }
+
+        return TextEdit(
+            range: lineBodyRange,
+            replacement: "",
+            selectedRangeAfterEdit: NSRange(location: lineRange.location, length: 0)
+        )
+    }
+
     public static func indentationEdit(in text: String, selectedRange: NSRange, outdent: Bool) -> TextEdit? {
         let nsText = text as NSString
         guard selectedRange.location <= nsText.length else { return nil }

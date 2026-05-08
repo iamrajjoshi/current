@@ -103,13 +103,13 @@ public enum TimelineRowHeightCalculator {
             return collapsedEmptyDayHeight
         }
 
-        let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let hasText = MarkdownBlockRendering.hasRenderedContent(in: document.text)
         guard isToday || isActive || hasText else {
             return collapsedEmptyDayHeight
         }
 
         let editorWidth = max(1, width)
-        let minimumEditorHeight = isToday && !hasText ? todayEmptyEditorMinimumHeight : expandedEditorMinimumHeight
+        let minimumEditorHeight = isToday ? todayEmptyEditorMinimumHeight : expandedEditorMinimumHeight
         let editorHeight = measuredEditorHeight(
             text: document.text,
             width: editorWidth,
@@ -131,34 +131,11 @@ public enum TimelineRowHeightCalculator {
         minimumHeight: CGFloat = expandedEditorMinimumHeight,
         configuration: CurrentConfiguration = .default
     ) -> CGFloat {
-        let storage = NSTextStorage(string: text)
-        let layoutManager = NSLayoutManager()
-        let textContainer = NSTextContainer(
-            size: NSSize(width: max(1, width), height: CGFloat.greatestFiniteMagnitude)
-        )
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
-        paragraph.maximumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
-        paragraph.lineBreakMode = .byWordWrapping
-
-        textContainer.lineFragmentPadding = 0
-        layoutManager.addTextContainer(textContainer)
-        storage.addLayoutManager(layoutManager)
-        storage.addAttributes(
-            [
-                .font: CurrentTheme.editorFont(configuration: configuration),
-                .foregroundColor: CurrentTheme.primaryTextColor,
-                .paragraphStyle: paragraph,
-                .baselineOffset: CurrentTheme.editorBaselineOffset
-            ],
-            range: NSRange(location: 0, length: storage.length)
-        )
-
-        layoutManager.ensureLayout(for: textContainer)
-        let used = layoutManager.usedRect(for: textContainer)
-        return max(
-            minimumHeight,
-            ceil(used.height + CurrentTheme.editorVerticalInset * 2 + 6)
+        MarkdownTextLayoutMeasurer.measuredHeight(
+            text: text,
+            width: width,
+            minimumHeight: minimumHeight,
+            configuration: configuration
         )
     }
 }
@@ -300,6 +277,14 @@ extension TimelineCollectionView {
             let minimizedChanged = nextParent.minimizedDayIDs != parent.minimizedDayIDs
             let configurationChanged = nextParent.configuration != parent.configuration
             let todayChanged = nextParent.today != parent.today
+            let contentOnlyChanged = contentChanged
+                && !structureChanged
+                && !spacerChanged
+                && !searchChanged
+                && !activeDayChanged
+                && !minimizedChanged
+                && !configurationChanged
+                && !todayChanged
             let activeOnlyChanged = activeDayChanged
                 && !structureChanged
                 && !contentChanged
@@ -315,6 +300,16 @@ extension TimelineCollectionView {
                 : nil
             let previousActiveDayID = parent.activeDayID
             let nextActiveDayID = nextParent.activeDayID
+            let contentChangedDayIDs = contentOnlyChanged
+                ? changedDayIDs(from: items, to: nextItems)
+                : []
+            let contentChangeAffectsRowHeight = contentOnlyChanged
+                && dayHeightChanged(
+                    dayIDs: contentChangedDayIDs,
+                    from: parent,
+                    to: nextParent
+                )
+            let caretAnchor = contentChangeAffectsRowHeight ? captureActiveEditorCaretAnchor() : nil
             if minimizedChanged {
                 pendingMinimizedToggleAnchor = nil
             }
@@ -334,6 +329,16 @@ extension TimelineCollectionView {
                 syncCollectionViewFrame()
                 if let anchor {
                     restore(anchor)
+                }
+            } else if contentOnlyChanged {
+                reconfigureVisibleDayItems(matching: contentChangedDayIDs, skipsActiveEditor: true)
+                if contentChangeAffectsRowHeight {
+                    collectionView.collectionViewLayout?.invalidateLayout()
+                    collectionView.layoutSubtreeIfNeeded()
+                    syncCollectionViewFrame()
+                    if let caretAnchor {
+                        restore(caretAnchor)
+                    }
                 }
             } else if layoutStateChanged {
                 reconfigureVisibleDayItems()
@@ -363,6 +368,72 @@ extension TimelineCollectionView {
 
             handleExplicitScrollRequestIfNeeded()
             isApplyingSnapshot = false
+        }
+
+        private func changedDayIDs(from oldItems: [TimelineCollectionItem], to newItems: [TimelineCollectionItem]) -> Set<String> {
+            let oldDays = Dictionary(uniqueKeysWithValues: oldItems.compactMap { item -> (String, DayDocument)? in
+                guard case .day(let document) = item else { return nil }
+                return (document.id, document)
+            })
+            let newDays = Dictionary(uniqueKeysWithValues: newItems.compactMap { item -> (String, DayDocument)? in
+                guard case .day(let document) = item else { return nil }
+                return (document.id, document)
+            })
+
+            return Set(newDays.compactMap { dayID, document in
+                oldDays[dayID] == document ? nil : dayID
+            })
+        }
+
+        private func dayHeightChanged(
+            dayIDs: Set<String>,
+            from oldParent: TimelineCollectionView,
+            to newParent: TimelineCollectionView
+        ) -> Bool {
+            guard !dayIDs.isEmpty,
+                  let collectionView else { return false }
+            let width = itemWidth(in: collectionView)
+            let oldDocuments = Dictionary(uniqueKeysWithValues: oldParent.days.map { ($0.id, $0) })
+            let newDocuments = Dictionary(uniqueKeysWithValues: newParent.days.map { ($0.id, $0) })
+
+            return dayIDs.contains { dayID in
+                guard let oldDocument = oldDocuments[dayID],
+                      let newDocument = newDocuments[dayID] else {
+                    return true
+                }
+
+                let oldHeight = height(
+                    for: oldDocument,
+                    in: oldParent,
+                    width: width
+                )
+                let newHeight = height(
+                    for: newDocument,
+                    in: newParent,
+                    width: width
+                )
+                return abs(oldHeight - newHeight) > 0.5
+            }
+        }
+
+        private func height(
+            for document: DayDocument,
+            in parent: TimelineCollectionView,
+            width: CGFloat
+        ) -> CGFloat {
+            TimelineRowHeightCalculator.height(
+                for: document,
+                isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
+                isActive: document.id == parent.activeDayID,
+                isMinimized: TimelineDayPresentation.isEffectivelyMinimized(
+                    document: document,
+                    isToday: Calendar.current.isDate(document.date, inSameDayAs: parent.today),
+                    minimizedDayIDs: parent.minimizedDayIDs,
+                    searchQuery: parent.searchQuery
+                ),
+                width: width,
+                configuration: parent.configuration
+            )
         }
 
         func collectionView(
@@ -610,6 +681,39 @@ extension TimelineCollectionView {
             scroll(toY: targetY, in: scrollView, collectionView: collectionView)
         }
 
+        private func captureActiveEditorCaretAnchor() -> MarkdownEditorCaretAnchor? {
+            guard let collectionView,
+                  let scrollView,
+                  let textView = MarkdownTextView.activeEditor,
+                  textView.isDescendant(of: collectionView),
+                  let caretY = caretY(in: collectionView, for: textView) else {
+                return nil
+            }
+
+            return MarkdownEditorCaretAnchor(
+                dayID: textView.currentDayID,
+                offsetFromVisibleTop: scrollView.contentView.bounds.minY - caretY
+            )
+        }
+
+        private func restore(_ anchor: MarkdownEditorCaretAnchor) {
+            guard let collectionView,
+                  let scrollView,
+                  let textView = MarkdownTextView.activeEditor,
+                  textView.currentDayID == anchor.dayID,
+                  textView.isDescendant(of: collectionView),
+                  let caretY = caretY(in: collectionView, for: textView) else {
+                return
+            }
+
+            let targetY = caretY + anchor.offsetFromVisibleTop
+            scroll(toY: targetY, in: scrollView, collectionView: collectionView)
+        }
+
+        private func caretY(in collectionView: NSCollectionView, for textView: MarkdownTextView) -> CGFloat? {
+            MarkdownVisibleCaret.caretY(in: collectionView, for: textView)
+        }
+
         private func handleExplicitScrollRequestIfNeeded() {
             guard let request = parent.scrollRequest,
                   request.id != handledScrollRequestID,
@@ -638,12 +742,19 @@ extension TimelineCollectionView {
             scrollView.reflectScrolledClipView(scrollView.contentView)
         }
 
-        private func reconfigureVisibleDayItems(matching dayIDs: Set<String>? = nil) {
+        private func reconfigureVisibleDayItems(
+            matching dayIDs: Set<String>? = nil,
+            skipsActiveEditor: Bool = false
+        ) {
             guard let collectionView else { return }
+            let activeDayID = skipsActiveEditor ? MarkdownTextView.activeEditor?.currentDayID : nil
             for indexPath in collectionView.indexPathsForVisibleItems() where indexPath.item < items.count {
                 guard case .day(let document) = items[indexPath.item],
                       let dayItem = collectionView.item(at: indexPath) as? TimelineDayCollectionItem else { continue }
                 if let dayIDs, !dayIDs.contains(document.id) {
+                    continue
+                }
+                if document.id == activeDayID {
                     continue
                 }
                 dayItem.configure(
@@ -667,7 +778,7 @@ extension TimelineCollectionView {
                 .compactMap { $0 }
                 .contains { dayID in
                     guard case .day(let document) = items.first(where: { $0.dayID == dayID }) else { return false }
-                    let hasText = !document.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    let hasText = MarkdownBlockRendering.hasRenderedContent(in: document.text)
                     let isToday = Calendar.current.isDate(document.date, inSameDayAs: parent.today)
                     return !hasText && !isToday
                 }
@@ -738,6 +849,11 @@ extension TimelineCollectionView {
 
 private struct ScrollAnchor {
     var dayID: String
+    var offsetFromVisibleTop: CGFloat
+}
+
+private struct MarkdownEditorCaretAnchor {
+    var dayID: String?
     var offsetFromVisibleTop: CGFloat
 }
 

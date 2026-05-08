@@ -2,6 +2,7 @@ import Combine
 import Foundation
 
 public enum MarkdownMarkerVisibility: String, Equatable, Hashable, Sendable {
+    case hidden
     case muted
 }
 
@@ -15,7 +16,7 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     public static let defaultHistoryWindowDays = 180
     public static let defaultAutosaveDelay: Double = 0.55
     public static let defaultHideEmptyWeekends = false
-    public static let defaultMarkdownMarkerVisibility = MarkdownMarkerVisibility.muted
+    public static let defaultMarkdownMarkerVisibility = MarkdownMarkerVisibility.hidden
     public static let defaultLibraryRoot: URL? = nil
 
     public var libraryRoot: URL?
@@ -73,7 +74,7 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     # history-window-days = 180
     # autosave-delay = 0.55
     # hide-empty-weekends = false
-    # markdown-marker-visibility = muted
+    # markdown-marker-visibility = hidden
     #
     # Split config into another file:
     # config-file = extras.current
@@ -618,6 +619,10 @@ private enum CurrentConfigurationLoader {
     ) -> MarkdownMarkerVisibility? {
         guard !value.isEmpty else {
             return defaultValue
+        }
+
+        if value.lowercased() == MarkdownMarkerVisibility.muted.rawValue {
+            return .hidden
         }
 
         guard let visibility = MarkdownMarkerVisibility(rawValue: value.lowercased()) else {
