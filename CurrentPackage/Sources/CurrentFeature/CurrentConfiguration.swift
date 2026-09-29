@@ -8,9 +8,9 @@ public enum MarkdownMarkerVisibility: String, Equatable, Hashable, Sendable {
 
 public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     public static let defaultFontFamily: String? = nil
-    public static let defaultFontSize: Double = 13
-    public static let defaultLineHeight: Double = 22
-    public static let defaultContentWidth: Double = 700
+    public static let defaultFontSize: Double = 16
+    public static let defaultLineHeight: Double = 25.6
+    public static let defaultContentWidth: Double = 640
     public static let defaultRecentDays = 7
     public static let defaultHistoryBatchDays = 14
     public static let defaultHistoryWindowDays = 180
@@ -66,9 +66,9 @@ public struct CurrentConfiguration: Equatable, Hashable, Sendable {
     #
     # library-root = ~/Documents/current
     # font-family =
-    # font-size = 13
-    # line-height = 22
-    # content-width = 700
+    # font-size = 16
+    # line-height = 25.6
+    # content-width = 640
     # recent-days = 7
     # history-batch-days = 14
     # history-window-days = 180

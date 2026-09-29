@@ -16,6 +16,7 @@ let package = Package(
             name: "CurrentFeatureChecks",
             targets: ["CurrentFeatureChecks"]
         ),
+        .executable(name: "CurrentUIProbe", targets: ["CurrentUIProbe"]),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -29,6 +30,7 @@ let package = Package(
                 "CurrentFeature"
             ]
         ),
+        .executableTarget(name: "CurrentUIProbe", dependencies: ["CurrentFeature"]),
         .testTarget(
             name: "CurrentFeatureTests",
             dependencies: [

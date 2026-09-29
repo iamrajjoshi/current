@@ -1,18 +1,18 @@
 const todayLines = [
-  "08:47  Dropped in before inbox",
+  "08:47  Vendor review",
   "- vendor review moved to Thursday",
   "- ask Sam for the latest risk note",
   "",
   "## Review",
   "- [ ] read the contract diff",
-  "- [ ] write down the decision, not the whole meeting"
+  "- [ ] send the renewal decision"
 ];
 
 const historyRows = [
-  ["Sat, May 2", "3 lines", "collapsed"],
-  ["Fri, May 1", "18 lines", "open"],
-  ["Thu, Apr 30", "empty", "hidden weekend off"],
-  ["Older notes", "loads as you scroll", "no button"]
+  ["Sat, May 2", "Contract review", "Two tasks still open"],
+  ["Fri, May 1", "Renewal call", "Revised terms requested"],
+  ["Apr 20–30", "No notes", "Expand these dates"],
+  ["Older notes", "Load as you scroll", "Or jump to a date"]
 ];
 
 export function FeatureGrid() {
@@ -20,20 +20,19 @@ export function FeatureGrid() {
     <section className="section evidence-section" id="features">
       <div className="shell evidence-shell">
         <div className="evidence-intro">
-          <p className="eyebrow">How it works</p>
-          <h2>One note per day, always ready.</h2>
+          <h2>Daily notes, grouped by stream.</h2>
           <p>
-            You write in one timeline. Current creates the dated sections, autosaves changes, and lets older days stay nearby without turning your notes into a dashboard.
+            Keep work and personal notes in separate streams. Each stream remembers your place and saves changes automatically.
           </p>
         </div>
 
         <div className="evidence-stack">
           <article className="evidence-row evidence-row-large">
             <div>
-              <p className="row-kicker">Open to today</p>
-              <h3>The first thing you see is the note for this date.</h3>
+              <h3>Start with today&apos;s note.</h3>
+              <p>Write meeting notes, add tasks, or paste text into the current day.</p>
             </div>
-            <div className="stream-excerpt" aria-label="Example Current daily stream">
+            <div className="stream-excerpt" aria-label="Example daily Markdown note">
               <div className="day-divider compact">
                 <strong>Today · Sun, May 3</strong>
                 <i />
@@ -50,16 +49,16 @@ export function FeatureGrid() {
 
           <article className="evidence-row">
             <div>
-              <p className="row-kicker">Saved as Markdown</p>
-              <h3>Each date has its own `.md` file on disk.</h3>
+              <h3>One Markdown file per day.</h3>
+              <p>Each stream has its own folder. Notes are stored by year and month.</p>
             </div>
             <pre className="inline-code-panel"><code>~/Documents/current/streams/daily/2026/05/2026-05-03.md</code></pre>
           </article>
 
           <article className="evidence-row">
             <div>
-              <p className="row-kicker">Scroll back in time</p>
-              <h3>Recent days are close by. Older days load as you scroll.</h3>
+              <h3>Find earlier notes.</h3>
+              <p>Scroll through a stream, choose a date from the calendar, or search across your notes.</p>
             </div>
             <div className="history-list" aria-label="Current history behavior">
               {historyRows.map(([day, detail, note]) => (
@@ -71,13 +70,6 @@ export function FeatureGrid() {
               ))}
             </div>
           </article>
-        </div>
-
-        <div className="refusal-strip" aria-label="Current does not include common workspace clutter">
-          <span>account</span>
-          <span>workspace setup</span>
-          <span>proprietary note database</span>
-          <span>dashboard before the text</span>
         </div>
       </div>
     </section>

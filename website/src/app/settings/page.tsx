@@ -16,14 +16,13 @@ export default function SettingsPage() {
         <section className="settings-hero">
           <div className="shell settings-hero-grid">
             <div>
-              <p className="eyebrow">Settings</p>
               <h1>Settings</h1>
               <p className="lede">
-                Current can read preferences from a config.current file. Defaults are built in, so you only add the keys you want to change.
+                Edit <code>config.current</code> to change Current&apos;s preferences. Add only the settings you want to override.
               </p>
             </div>
             <div className="settings-location-panel" aria-label="Current config search order">
-              <p className="panel-kicker">Search order</p>
+              <p className="panel-kicker">Current reads the first file it finds:</p>
               <ol>
                 {configLocations.map((location) => (
                   <li key={location}>
@@ -40,7 +39,6 @@ export default function SettingsPage() {
             {Object.entries(groupedSettings).map(([category, categorySettings]) => (
               <section className="settings-group" key={category}>
                 <div className="settings-group-heading">
-                  <p className="eyebrow">{category}</p>
                   <h2>{category}</h2>
                 </div>
                 <div className="settings-table-wrap">
@@ -76,10 +74,9 @@ export default function SettingsPage() {
         <section className="settings-snippet">
           <div className="shell snippet-grid">
             <div>
-              <p className="eyebrow">config.current</p>
-              <h2>Complete starter file</h2>
+              <h2>Example config.current</h2>
               <p>
-                Empty values reset to Current defaults. Whole-line comments and blank lines are ignored. Included files are parsed after the containing file, so machine-specific overrides can stay separate.
+                Empty values reset a setting to its default. Blank lines and whole-line comments are ignored. Included files are read afterward and can override earlier values.
               </p>
             </div>
             <pre className="code-panel"><code>{completeConfigSnippet}</code></pre>

@@ -2,6 +2,12 @@
 
 - If using XcodeBuildMCP, use the installed XcodeBuildMCP skill before calling XcodeBuildMCP tools.
 
+## Design preferences
+
+- Don't add decorative gradients, glows, simulated glass, or ornamental shadows to the app or website. Use solid surfaces, typography, spacing, and functional selection states.
+- Keep native macOS materials and controls; let the operating system own their appearance. Don't recreate them with custom effects.
+- Avoid promotional empty-state copy, repeated labels, decorative numbering, and unnecessary cards or pills. Use realistic notes in visual reviews.
+
 ## Releases
 
 - Releases are manual only. Use the `Release` GitHub Actions workflow (`.github/workflows/release.yml`) with a `version` input like `0.1.0`.

@@ -5,7 +5,7 @@
 :root {
   color-scheme: light;
   --page: #ffffff;
-  --surface: #f6f5f4;
+  --surface: #f5f5f5;
   --surface-strong: #ece9e5;
   --ink: rgba(0, 0, 0, 0.92);
   --muted: #615d59;
@@ -34,7 +34,7 @@ body {
   margin: 0;
   background: var(--page);
   color: var(--ink);
-  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   letter-spacing: 0;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -66,8 +66,7 @@ select {
   top: 0;
   z-index: 20;
   border-bottom: 1px solid var(--soft-line);
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(18px);
+  background: var(--page);
 }
 
 .site-nav-inner {
@@ -101,8 +100,7 @@ select {
   font-weight: 650;
 }
 
-.brand-link img,
-.hero-icon {
+.brand-link img {
   border-radius: 8px;
 }
 
@@ -128,55 +126,25 @@ select {
 }
 
 .landing-hero {
-  position: relative;
-  min-height: 78svh;
-  overflow: hidden;
   border-bottom: 1px solid var(--soft-line);
-  background: #ffffff;
-}
-
-.hero-paper {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-
-.hero-paper::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: min(58vw, 760px);
-  border-left: 0;
-  background:
-    linear-gradient(180deg, rgba(246, 245, 244, 0.72), rgba(255, 255, 255, 0.82)),
-    var(--surface);
+  background: var(--page);
 }
 
 .hero-content {
-  position: relative;
-  z-index: 2;
-  min-height: 78svh;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 64px;
   align-items: center;
-  padding: 78px 0 72px;
+  padding: 72px 0;
 }
 
 .hero-copy {
   max-width: 520px;
 }
 
-.hero-icon {
-  width: 64px;
-  height: 64px;
-  margin-bottom: 24px;
-  box-shadow: 0 12px 32px rgba(31, 30, 28, 0.12);
-}
-
 .eyebrow {
   margin: 0 0 14px;
-  color: var(--sage);
+  color: var(--muted);
   font-size: 12px;
   font-weight: 700;
   line-height: 1.3;
@@ -191,20 +159,42 @@ p {
 }
 
 .hero-copy h1 {
-  margin-bottom: 14px;
-  font-size: 70px;
-  line-height: 0.95;
-  font-weight: 730;
-  letter-spacing: 0;
+  max-width: 440px;
+  margin-bottom: 20px;
+  font-size: 54px;
+  line-height: 1.06;
+  font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
-.hero-lines {
-  max-width: 500px;
-  margin-bottom: 18px;
-  color: var(--ink);
-  font-size: 27px;
-  line-height: 1.22;
-  font-weight: 580;
+.hero-note {
+  border-left: 1px solid var(--line);
+  padding: 16px 0 16px 40px;
+  font-size: 16px;
+  line-height: 1.6;
+}
+
+.hero-note .note-date {
+  margin-bottom: 24px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.hero-note h2 {
+  margin-bottom: 12px;
+  font-size: 26px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.hero-note ul {
+  margin: 20px 0;
+  padding-left: 22px;
+  list-style: disc;
+}
+
+.hero-note p:last-child {
+  margin-bottom: 0;
 }
 
 .hero-detail,
@@ -299,55 +289,12 @@ pre {
   white-space: nowrap;
 }
 
-.stream-window {
-  position: absolute;
-  right: max(28px, calc((100vw - 1120px) / 2 - 10px));
-  top: 92px;
-  bottom: 48px;
-  width: min(590px, 52vw);
-  border-left: 0;
-  border-radius: 0;
-  background: rgba(255, 255, 255, 0.54);
-  box-shadow: none;
-  overflow: hidden;
-}
-
-.window-toolbar {
-  height: 42px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-bottom: 1px solid var(--soft-line);
-  background: rgba(246, 245, 244, 0.88);
-  padding: 0 14px;
-}
-
-.window-toolbar span {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: #d9d4cf;
-}
-
-.window-toolbar p {
-  flex: 1;
-  margin: 0 42px 0 0;
-  color: var(--faint);
-  font-size: 12px;
-  text-align: center;
-}
-
-.stream-body {
-  padding: 54px 0 64px 56px;
-}
-
 .day-divider {
   display: flex;
   align-items: center;
   gap: 13px;
   color: rgba(97, 93, 89, 0.86);
   font-size: 11px;
-  text-transform: uppercase;
   letter-spacing: 0;
 }
 
@@ -464,15 +411,13 @@ pre {
   font-weight: 700;
 }
 
-.evidence-row h3,
-.roadmap-item h3 {
+.evidence-row h3 {
   margin: 0 0 10px;
   font-size: 19px;
   line-height: 1.25;
   font-weight: 700;
 }
 
-.roadmap-item p,
 .settings-preview span,
 .settings-table,
 .settings-location-panel {
@@ -535,21 +480,6 @@ pre {
   font-style: normal;
 }
 
-.refusal-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  border-bottom: 1px solid var(--soft-line);
-  padding-bottom: 18px;
-  color: var(--muted);
-  font-size: 13px;
-}
-
-.refusal-strip span::before {
-  content: "No ";
-  color: var(--faint);
-}
-
 .storage-section,
 .settings-snippet {
   border-top: 1px solid var(--soft-line);
@@ -587,7 +517,7 @@ pre {
   margin: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
-  background: #fffdfc;
+  background: var(--page);
   color: var(--muted);
   overflow-x: auto;
   box-shadow: none;
@@ -615,10 +545,6 @@ pre {
   font-weight: 650;
 }
 
-.text-link::after {
-  content: " ->";
-}
-
 .settings-preview {
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--soft-line);
@@ -644,32 +570,6 @@ pre {
 .settings-location-panel code {
   color: var(--accent);
   font-size: 13px;
-}
-
-.roadmap-section {
-  border-top: 1px solid var(--soft-line);
-}
-
-.roadmap-list {
-  display: grid;
-  grid-template-columns: 1fr;
-  border-top: 1px solid var(--line);
-}
-
-.roadmap-item {
-  display: grid;
-  grid-template-columns: 74px minmax(170px, 0.45fr) minmax(0, 1fr);
-  gap: 20px;
-  align-items: baseline;
-  border-bottom: 1px solid var(--soft-line);
-  background: transparent;
-  padding: 18px 0;
-}
-
-.roadmap-item span {
-  color: var(--faint);
-  font-family: "SFMono-Regular", ui-monospace, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
 }
 
 .install-section {
@@ -804,7 +704,6 @@ pre {
   color: var(--ink);
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
 }
 
 .settings-table tr:last-child td {
@@ -832,29 +731,11 @@ pre {
 }
 
 @media (max-width: 980px) {
-  .hero-paper::before {
-    width: 100%;
-    border-left: 0;
-    background: linear-gradient(180deg, rgba(246, 245, 244, 0.48), rgba(255, 255, 255, 0.86));
+  .hero-content {
+    gap: 32px;
   }
 
-  .hero-copy h1 {
-    font-size: 62px;
-  }
-
-  .hero-lines {
-    font-size: 24px;
-  }
-
-  .stream-window {
-    right: -210px;
-    width: 660px;
-    border-left: 0;
-    opacity: 0.32;
-  }
-
-  .evidence-row,
-  .roadmap-item {
+  .evidence-row {
     grid-template-columns: 1fr;
     gap: 16px;
   }
@@ -898,29 +779,20 @@ pre {
     font-size: 12px;
   }
 
-  .landing-hero,
   .hero-content {
-    min-height: 0;
-  }
-
-  .hero-content {
-    align-items: flex-start;
-    padding-top: 36px;
-    padding-bottom: 238px;
-  }
-
-  .hero-icon {
-    width: 48px;
-    height: 48px;
-    margin-bottom: 16px;
+    grid-template-columns: 1fr;
+    gap: 36px;
+    padding: 36px 0;
   }
 
   .hero-copy h1 {
-    font-size: 48px;
+    font-size: 40px;
   }
 
-  .hero-lines {
-    font-size: 21px;
+  .hero-note {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 28px 0 0;
   }
 
   .hero-detail,
@@ -931,26 +803,6 @@ pre {
   .settings-hero .lede,
   .settings-snippet p {
     font-size: 15px;
-  }
-
-  .stream-window {
-    left: 14px;
-    right: 14px;
-    top: auto;
-    bottom: 18px;
-    width: auto;
-    height: 194px;
-    border-top: 1px solid var(--soft-line);
-    border-left: 0;
-    opacity: 0.78;
-  }
-
-  .stream-body {
-    padding: 24px 20px 28px;
-  }
-
-  .stream-window .day-divider.muted {
-    display: none;
   }
 
   .section {
@@ -978,15 +830,6 @@ pre {
   .history-row {
     grid-template-columns: 1fr;
     gap: 4px;
-  }
-
-  .roadmap-item {
-    min-height: 0;
-  }
-
-  .roadmap-item {
-    grid-template-columns: 1fr;
-    gap: 6px;
   }
 
   .setting-preview-row {
@@ -1062,7 +905,6 @@ pre {
     color: var(--faint);
     font-size: 11px;
     font-weight: 700;
-    text-transform: uppercase;
   }
 
   .settings-snippet {
@@ -1072,5 +914,15 @@ pre {
   .footer-inner {
     align-items: flex-start;
     flex-direction: column;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  .button {
+    transition: none;
   }
 }

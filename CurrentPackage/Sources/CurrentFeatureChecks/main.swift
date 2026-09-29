@@ -29,7 +29,7 @@ struct CurrentFeatureChecks {
         try rowHeightCalculatorExpandsActiveEmptyRows()
         try rowHeightCalculatorCollapsesMinimizedHistoricalTextRows()
         try rowHeightCalculatorKeepsTodayExpandedWhenMinimized()
-        try rowHeightCalculatorUsesLargeMinimumForEmptyToday()
+        try rowHeightCalculatorKeepsCompactTodayInputStable()
         try rowHeightCalculatorGrowsForMultilineText()
         try rowHeightCalculatorUsesRenderedMarkdownMetrics()
         try timelineLayoutMetricsCenterTheWritingColumn()
@@ -54,7 +54,7 @@ struct CurrentFeatureChecks {
         try markdownHorizontalRuleBackspaceExitsBlock()
         try markdownInlineBackspaceHandlesHiddenMarkers()
         try await autosaveWritesOnlyTheEditedDay()
-        try rolloverCreatesANewTodayAndKeepsHistoryVisible()
+        try rolloverUpdatesTodayWithoutMovingExistingWriting()
         try streamStoreDetectsExternalConflictsBeforeOverwrite()
         try dayCacheEvictsCleanDocumentsButPinsDirtyAndToday()
         print("CurrentFeatureChecks passed")
@@ -280,7 +280,7 @@ struct CurrentFeatureChecks {
         controller.bootstrapIfNeeded(now: now)
 
         try check(controller.stream?.name == "Daily", "Expected Daily stream")
-        try check(controller.days.map(\.id) == ["2026-04-29"], "Bootstrap should not render blank days before stream creation")
+        try check(controller.days.map(\.dayKey) == ["2026-04-29"], "Bootstrap should not render blank days before stream creation")
         try check(
             FileManager.default.fileExists(atPath: root.appendingPathComponent("streams/daily/2026/04/2026-04-29.md").path),
             "Today file was not created"
@@ -314,8 +314,8 @@ struct CurrentFeatureChecks {
         try check(controller.historyWindowDayCount == 9, "Controller did not apply configured history window size")
         try check(controller.autosaveDelay == 1.2, "Controller did not apply configured autosave delay")
         try check(
-            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
-            "Configured recent and batch day counts should drive launch and older history, got \(controller.days.map(\.id))"
+            controller.days.map(\.dayKey) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
+            "Configured recent and batch day counts should drive launch and older history, got \(controller.days.map(\.dayKey))"
         )
     }
 
@@ -334,7 +334,7 @@ struct CurrentFeatureChecks {
         controller.apply(configuration: CurrentConfiguration(libraryRoot: configuredRoot, recentDays: 1))
         controller.bootstrapIfNeeded(now: now)
 
-        try check(controller.store.libraryRoot == configuredRoot.standardizedFileURL, "Controller did not apply configured library root")
+        try check(controller.store.libraryRoot.path == configuredRoot.standardizedFileURL.path, "Controller did not apply configured library root")
         try check(
             FileManager.default.fileExists(atPath: configuredRoot.appendingPathComponent("streams/daily/2026/04/2026-04-29.md").path),
             "Configured library root did not receive today's file"
@@ -364,7 +364,7 @@ struct CurrentFeatureChecks {
         controller.loadOlderDays()
 
         try check(
-            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25"],
+            controller.days.map(\.dayKey) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25"],
             "Older days should append below today in reverse chronological order"
         )
     }
@@ -388,7 +388,7 @@ struct CurrentFeatureChecks {
         controller.loadOlderDays()
 
         try check(
-            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
+            controller.days.map(\.dayKey) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26", "2026-04-25", "2026-04-24", "2026-04-23"],
             "Missing older days should appear in memory for scrollable history"
         )
         try check(
@@ -417,7 +417,7 @@ struct CurrentFeatureChecks {
         controller.loadOlderDays()
 
         try check(
-            controller.days.map(\.id) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26"],
+            controller.days.map(\.dayKey) == ["2026-04-29", "2026-04-28", "2026-04-27", "2026-04-26"],
             "Blank placeholder history should stop at the stream creation day"
         )
         try check(controller.canLoadOlderDays == false, "History loader should stop when there are no older blanks or files")
@@ -448,11 +448,11 @@ struct CurrentFeatureChecks {
         controller.bootstrapIfNeeded(now: now)
 
         try check(
-            controller.days.map(\.id) == ["2026-05-04", "2026-05-02", "2026-05-01"],
+            controller.days.map(\.dayKey) == ["2026-05-04", "2026-05-02", "2026-05-01"],
             "Empty Sundays should hide, but weekend notes and weekdays should stay visible"
         )
         try check(
-            controller.days.first { $0.id == "2026-05-02" }?.text == "Weekend note",
+            controller.days.first { $0.dayKey == "2026-05-02" }?.text == "Weekend note",
             "Weekend notes should remain loaded when empty weekends are hidden"
         )
     }
@@ -480,15 +480,15 @@ struct CurrentFeatureChecks {
         controller.loadOlderDays()
 
         try check(controller.days.count == 12, "Rendered history should stay bounded by the configured window")
-        try check(controller.days.first?.id == "2026-04-19", "Compaction should slide the window toward older dates")
-        try check(controller.days.last?.id == "2026-04-08", "Older scrollback should keep extending after compaction")
+        try check(controller.days.first?.dayKey == "2026-04-19", "Compaction should slide the window toward older dates")
+        try check(controller.days.last?.dayKey == "2026-04-08", "Older scrollback should keep extending after compaction")
         try check(controller.topSpacerHeight > 0, "Compacted newer days should be represented by a top spacer")
         try check(controller.bottomSpacerHeight == 0, "Older-only scrolling should not create a bottom spacer")
         try check(controller.canLoadOlderDays == true, "History loader should remain available after compaction")
 
         controller.jumpToToday()
 
-        try check(controller.days.map(\.id) == ["2026-04-29", "2026-04-28"], "Jumping to today should restore the recent window")
+        try check(controller.days.map(\.dayKey) == ["2026-04-29", "2026-04-28"], "Jumping to today should restore the recent window")
         try check(controller.topSpacerHeight == 0, "Jumping to today should reset the top spacer")
         try check(controller.bottomSpacerHeight == 0, "Jumping to today should reset the bottom spacer")
     }
@@ -516,11 +516,11 @@ struct CurrentFeatureChecks {
         controller.loadOlderDays()
 
         try check(
-            controller.days.contains { $0.id == "2026-04-01" },
+            controller.days.contains { $0.dayKey == "2026-04-01" },
             "Actual older Markdown files should remain reachable when their date enters the endless history"
         )
         try check(
-            controller.days.first { $0.id == "2026-04-01" }?.text == "Imported old note",
+            controller.days.first { $0.dayKey == "2026-04-01" }?.text == "Imported old note",
             "Expected the older actual file to load"
         )
     }
@@ -548,12 +548,12 @@ struct CurrentFeatureChecks {
         controller.loadOlderWindow()
         let topSpacerBefore = controller.topSpacerHeight
 
-        try check(controller.days.first?.id == "2026-04-19", "Expected newer days to be trimmed after older paging")
+        try check(controller.days.first?.dayKey == "2026-04-19", "Expected newer days to be trimmed after older paging")
         try check(topSpacerBefore > 0, "Expected top spacer before loading newer rows")
 
         controller.loadNewerWindow()
 
-        try check(controller.days.first?.id == "2026-04-24", "Loading newer should restore the next newer batch above the window")
+        try check(controller.days.first?.dayKey == "2026-04-24", "Loading newer should restore the next newer batch above the window")
         try check(controller.days.count == 12, "Newer paging should keep the retained row count bounded")
         try check(controller.topSpacerHeight < topSpacerBefore, "Loading newer should consume top spacer height")
         try check(controller.bottomSpacerHeight > 0, "Loading newer from a trimmed top should trim older rows into a bottom spacer")
@@ -583,15 +583,15 @@ struct CurrentFeatureChecks {
             controller.loadOlderWindow()
         }
 
-        try check(!controller.days.contains { $0.id == "2026-04-28" }, "Recent note should be trimmed out of the visible window")
+        try check(!controller.days.contains { $0.dayKey == "2026-04-28" }, "Recent note should be trimmed out of the visible window")
         try check(controller.cache[noteDate] == nil, "Clean off-window note should be allowed to evict from cache")
 
-        for _ in 0..<20 where !controller.days.contains(where: { $0.id == "2026-04-28" }) {
+        for _ in 0..<20 where !controller.days.contains(where: { $0.dayKey == "2026-04-28" }) {
             controller.loadNewerWindow()
         }
 
         try check(
-            controller.days.first { $0.id == "2026-04-28" }?.text == "Persisted recent note",
+            controller.days.first { $0.dayKey == "2026-04-28" }?.text == "Persisted recent note",
             "Reloading newer rows should restore clean trimmed document text from disk"
         )
     }
@@ -618,7 +618,7 @@ struct CurrentFeatureChecks {
         controller.loadOlderWindow()
         controller.loadOlderWindow()
 
-        try check(!controller.days.contains { $0.id == "2026-04-29" }, "Today should be trimmed out of the visible window")
+        try check(!controller.days.contains { $0.dayKey == "2026-04-29" }, "Today should be trimmed out of the visible window")
         try check(controller.cache[now]?.isDirty == true, "Dirty off-window documents should remain cached")
 
         controller.save(now)
@@ -648,12 +648,12 @@ struct CurrentFeatureChecks {
         controller.bootstrapIfNeeded(now: now)
         controller.setActiveDate(yesterday)
 
-        try check(controller.activeDayID == "2026-04-28", "Historical day should become active before minimizing")
+        try check(controller.activeDayID == controller.dayID(for: yesterday), "Historical day should become active before minimizing")
 
         controller.toggleDayMinimized(yesterday)
 
         try check(controller.isDayMinimized(yesterday), "Historical text day should be minimized")
-        try check(controller.minimizedDayIDs == Set(["2026-04-28"]), "Minimized day IDs should contain the historical day")
+        try check(controller.minimizedDayIDs == Set([controller.dayID(for: yesterday)]), "Minimized day IDs should contain the historical day")
         try check(controller.activeDayID == nil, "Minimized active day should stop being treated as active")
 
         controller.toggleDayMinimized(yesterday)
@@ -736,20 +736,28 @@ struct CurrentFeatureChecks {
         try check(minimizedHeight > TimelineRowHeightCalculator.collapsedEmptyDayHeight, "Today should remain expanded")
     }
 
-    static func rowHeightCalculatorUsesLargeMinimumForEmptyToday() throws {
+    static func rowHeightCalculatorKeepsCompactTodayInputStable() throws {
         let calendar = fixedCalendar()
         let date = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29)))
         let document = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today.md"), text: "")
-        let emptyHeading = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today-heading.md"), text: "## ")
         let firstLetter = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today-first-letter.md"), text: "A")
 
         let height = TimelineRowHeightCalculator.height(for: document, isToday: true, width: 700)
-        let emptyHeadingHeight = TimelineRowHeightCalculator.height(for: emptyHeading, isToday: true, width: 700)
         let firstLetterHeight = TimelineRowHeightCalculator.height(for: firstLetter, isToday: true, width: 700)
 
-        try check(height >= 320, "Today empty row should reserve the large editor minimum")
-        try check(emptyHeadingHeight == height, "Empty heading markers should keep the same Today breathing room as an empty note")
+        try check(height >= TimelineRowHeightCalculator.todayEmptyEditorMinimumHeight, "Today should reserve its configured capture area")
         try check(firstLetterHeight == height, "Typing the first letter should not shrink Today's editor")
+        for level in 1...3 {
+            let prefix = String(repeating: "#", count: level) + " "
+            let emptyHeading = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today-heading.md"), text: prefix)
+            let headingWithText = DayDocument(streamID: UUID(), date: date, fileURL: URL(fileURLWithPath: "/tmp/today-heading-letter.md"), text: prefix + "A")
+            let emptyHeadingHeight = TimelineRowHeightCalculator.height(for: emptyHeading, isToday: true, width: 700)
+            let headingWithTextHeight = TimelineRowHeightCalculator.height(for: headingWithText, isToday: true, width: 700)
+            // A heading can exceed the compact capture minimum. Its first
+            // visible letter should keep the same native paragraph geometry.
+            try check(emptyHeadingHeight >= height, "Starting an H\(level) heading should not shrink Today's capture area")
+            try check(emptyHeadingHeight == headingWithTextHeight, "Typing the first H\(level) heading letter should preserve its paragraph height")
+        }
     }
 
     static func rowHeightCalculatorGrowsForMultilineText() throws {
@@ -786,7 +794,9 @@ struct CurrentFeatureChecks {
             minimumHeight: 0
         )
         let wrappedHiddenSyntaxHeight = TimelineRowHeightCalculator.measuredEditorHeight(
-            text: "**\(String(repeating: "x", count: 10))**",
+            // Strikethrough preserves the content font's width. Proportional
+            // bold is wider than plain text and can legitimately wrap sooner.
+            text: "~~\(String(repeating: "x", count: 10))~~",
             width: 80,
             minimumHeight: 0
         )
@@ -828,23 +838,23 @@ struct CurrentFeatureChecks {
 
     static func timelineLayoutMetricsCenterTheWritingColumn() throws {
         try check(
-            TimelineLayoutMetrics.itemWidth(availableWidth: 700) == 588,
+            TimelineLayoutMetrics.itemWidth(availableWidth: 700) == 636,
             "Compact widths should keep fixed horizontal padding"
         )
         try check(
-            TimelineLayoutMetrics.horizontalInset(availableWidth: 700) == 56,
+            TimelineLayoutMetrics.horizontalInset(availableWidth: 700) == 32,
             "Compact widths should preserve the minimum horizontal inset"
         )
         try check(
-            TimelineLayoutMetrics.itemWidth(availableWidth: 820) == 700,
-            "Minimum app width should allow the max writing column"
+            TimelineLayoutMetrics.itemWidth(availableWidth: 820) == 640,
+            "The default writing column should stop growing at its readable width"
         )
         try check(
-            TimelineLayoutMetrics.horizontalInset(availableWidth: 820) == 60,
-            "Minimum app width should center the max writing column"
+            TimelineLayoutMetrics.horizontalInset(availableWidth: 820) == 90,
+            "The capped writing column should keep symmetric content padding"
         )
         try check(
-            TimelineLayoutMetrics.horizontalInset(availableWidth: 1200) == 250,
+            TimelineLayoutMetrics.horizontalInset(availableWidth: 1200) == 280,
             "Wide widths should recenter the max writing column"
         )
     }
@@ -1380,7 +1390,7 @@ struct CurrentFeatureChecks {
     }
 
     @MainActor
-    static func rolloverCreatesANewTodayAndKeepsHistoryVisible() throws {
+    static func rolloverUpdatesTodayWithoutMovingExistingWriting() throws {
         let root = try temporaryRoot()
         let calendar = fixedCalendar()
         let april29 = try require(calendar.date(from: DateComponents(year: 2026, month: 4, day: 29, hour: 23)))
@@ -1393,15 +1403,22 @@ struct CurrentFeatureChecks {
             now: april29
         )
         controller.bootstrapIfNeeded(now: april29)
+        controller.updateText(for: april29, text: "Writing across midnight")
+        let previousDays = controller.days.map(\.id)
+        let previousRequest = controller.scrollRequest
 
         controller.handleDayRollover(now: april30)
 
         try check(controller.today == calendar.startOfDay(for: april30), "Today did not roll forward")
-        try check(controller.days.map(\.id).first == "2026-04-30", "New today is not at the top")
-        try check(controller.days.map(\.id).contains("2026-04-29"), "Rollover should keep post-creation history visible")
+        try check(controller.activeDate == calendar.startOfDay(for: april29), "Rollover moved the active editing day")
+        try check(controller.days.map(\.id) == previousDays, "Rollover replaced the visible history window")
+        try check(controller.scrollRequest == previousRequest, "Rollover issued an unexpected scroll request")
+        try check(controller.activeDocument?.text == "Writing across midnight", "Rollover lost the existing writing")
+        controller.jumpToToday()
+        try check(controller.days.map(\.dayKey).first == "2026-04-30", "Explicit Today navigation did not open the new day")
         try check(
             FileManager.default.fileExists(atPath: root.appendingPathComponent("streams/daily/2026/04/2026-04-30.md").path),
-            "Rolled-over day file was not created"
+            "Explicit Today navigation did not create the new day file"
         )
     }
 
@@ -1491,11 +1508,7 @@ struct CurrentFeatureChecks {
         let store = StreamStore(libraryRoot: root, calendar: calendar)
         var stream = try store.defaultStream()
         stream.createdAt = createdAt
-        let metadataURL = stream.rootURL.appendingPathComponent(".current-stream.json")
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        try encoder.encode(stream).write(to: metadataURL, options: [.atomic])
+        try store.saveLibrary(streams: [stream], folders: [])
         return store
     }
 

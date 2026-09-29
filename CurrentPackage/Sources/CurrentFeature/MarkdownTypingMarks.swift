@@ -47,7 +47,7 @@ struct MarkdownTypingMarks: Equatable {
             case .strikethrough:
                 attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
             case .inlineCode:
-                attributes[.font] = CurrentTheme.editorFont(configuration: configuration)
+                attributes[.font] = CurrentTheme.editorCodeFont(configuration: configuration)
                 attributes[.foregroundColor] = CurrentTheme.secondaryTextColor
                 attributes[.backgroundColor] = CurrentTheme.inlineCodeBackgroundColor
             }

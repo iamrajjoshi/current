@@ -1,21 +1,35 @@
 # Current - macOS App
 
-Current is a native macOS daily stream Markdown editor. MVP 0 focuses on capture: open the app, type or paste messy notes, trust autosave, and scroll through recent history. The UI feels like one continuous stream, while storage stays transparent as plain daily Markdown files.
+Current is a native macOS Markdown workspace organized around daily streams. A folder sidebar holds streams such as Daily, Work, and Journal; each opens a continuous timeline of ordinary Markdown files.
 
-The project uses a **workspace + SPM package** architecture for clean separation between app shell and feature code.
+## Writing workspace
 
-## MVP 0
+- Create, rename, reorder, pin, archive, and restore streams; group them in folders.
+- Use a compact sidebar and a centered 640-point writing column. Open tabs explicitly, or use focus mode to hide navigation and controls.
+- Fold empty historical dates into compact ranges, preview collapsed notes, and see written days in the calendar.
+- Read rendered Markdown with proportional text, native tasks, code blocks, tables, and local images. Edit source in place or toggle Markdown Source.
+- Use native text input, undo, find, rich-text paste, and relative image attachments.
+- Type `[[` to complete a link to an existing stream; folder-qualified names distinguish duplicate names.
+- Search history with clean highlighted excerpts, switch streams with folder context, and jump directly to a date.
+- Use light, dark, or system appearance. Explicit font settings are preserved.
+- Keep notes local at `~/Documents/current/streams/<stream>/YYYY/MM/YYYY-MM-DD.md` by default. Set `library-root` to use another directory.
+- Autosave retains document-specific destinations, detects external conflicts, and flushes on normal quit. Dirty recovery records are written after a 150 ms debounce; forced termination can lose the most recent edits before that write completes.
 
-- One default stream: **Daily** (`daily` on disk)
-- Today plus recent days in a single scrollable timeline
-- Transparent storage at `~/Documents/current/streams/daily/YYYY/MM/YYYY-MM-DD.md`
-- Configurable base folder with `library-root = ~/Documents/current`
-- Generated day dividers in the UI; each Markdown file contains only that day's notes
-- AppKit `NSTextView`-backed Markdown editor sections
-- Syntax highlighting for headings, lists, checkboxes, links, emphasis, blockquotes, inline code, and fenced code blocks
-- Paste handling for plain text, Markdown, rich text, URLs, HTML snippets, and large meeting-note dumps
-- Autosave per day file with external edit conflict detection
-- Jump to today, insert timestamp, and reveal files
+| Action | Shortcut |
+| --- | --- |
+| Commands | ⌘K |
+| Switch stream | ⌘O |
+| Search history | ⇧⌘F |
+| Find in active day | ⌘F |
+| Today | ⇧⌘D |
+| Show/hide sidebar | ⌘\ |
+| Focus mode | ⇧⌘Return |
+| Markdown source | ⇧⌘M |
+| New stream | ⌘N |
+
+Daily streams are the primary model. Standalone notes, cloud sync, collaboration, math, and diagram rendering are outside this version. The editor uses native TextKit 1 with a revision-cached rendering model; a complete TextKit 2 migration remains separate work.
+
+The project uses a workspace plus Swift package: the app shell owns lifecycle and menus, while the package contains the editor, library, and interface.
 
 ## Project Architecture
 
@@ -48,7 +62,7 @@ Current/
 - Reduces project file conflicts in teams
 
 ### App Sandbox
-The app is sandboxed by default with basic file access permissions. Modify `Current.entitlements` to add capabilities as needed.
+The current app configuration is not sandboxed. Entitlements live in `Config/Current.entitlements`.
 
 ## Development Notes
 
@@ -65,18 +79,18 @@ The public routes are `/` for the landing page and `/settings/` for the configur
 
 Pushes to `main` deploy the static export to GitHub Pages with `.github/workflows/pages.yml`.
 
-### XcodeBuildMCP
+### Build and validate
 
-This repo was scaffolded with XcodeBuildMCP and should be built/tested with its CLI tools:
+Open `Current.xcworkspace` in Xcode to build the app. Package validation can also run with Command Line Tools:
 
-```sh
-xcodebuildmcp swift-package build --package-path CurrentPackage
-xcodebuildmcp swift-package test --package-path CurrentPackage
-xcodebuildmcp swift-package run --package-path CurrentPackage --executable-name CurrentFeatureChecks
-xcodebuildmcp macos build --workspace-path Current.xcworkspace --scheme Current
+```bash
+scripts/validate-local.sh all
+scripts/validate-local.sh probe --live --exercise --output /tmp/current-ui-check
 ```
 
-`CurrentFeatureChecks` is the environment-independent validation runner for storage, autosave, rollover, cache eviction, and conflict detection. The full macOS app build requires a full Xcode install selected with `xcode-select`; Command Line Tools alone cannot provide `xcodebuild`.
+The script detects the extra Swift Testing search paths required by some CLT installations. Set `CURRENT_BUILD_PATH` to use a separate scratch directory. `CurrentFeatureChecks` covers storage, autosave, rollover, cache eviction, and conflict detection. `CurrentUIProbe` mounts the actual interface and AppKit editor in an isolated temporary library and writes screenshots and a JSON report. It never opens the user's notes or preferences.
+
+The native probe exercises input, undo/redo, marked text, caret visibility, resizing, source mode, appearance, and saving. It supplements unit tests; it isn't a frame-rate benchmark, a full IME certification, or an accessibility audit. Full Xcode app/UI tests still require a configured Xcode installation.
 
 ### Code Organization
 Most development happens in `CurrentPackage/Sources/CurrentFeature/` - organize your code as you prefer.
@@ -122,7 +136,7 @@ Build settings are managed through **XCConfig files** in `Config/`:
 - `Config/Tests.xcconfig` - Test-specific settings
 
 ### App Sandbox & Entitlements
-The app is sandboxed by default with basic file access. Edit `Current/Current.entitlements` to add capabilities:
+The app currently uses an empty `Config/Current.entitlements` file. A future sandboxed distribution would require explicit file-access handling and appropriate entitlements, for example:
 ```xml
 <key>com.apple.security.files.user-selected.read-write</key>
 <true/>

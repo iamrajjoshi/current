@@ -1,4 +1,5 @@
 const tree = `~/Documents/current/
+├── .current-library.json
 └── streams/
     └── daily/
         ├── .current-stream.json
@@ -11,14 +12,13 @@ export function StorageSection() {
     <section className="section storage-section" id="storage">
       <div className="shell storage-grid">
         <div>
-          <p className="eyebrow">Storage</p>
-          <h2>Your notes are just files.</h2>
+          <h2>Markdown files on your Mac.</h2>
           <p>
-            By default, Current stores one Markdown file per day under `~/Documents/current`. Reveal the folder, back it up, sync it, or edit a file outside the app.
+            Current saves notes under <code>~/Documents/current</code> by default. Open the folder to back up your library or edit a note in another app.
           </p>
           <div className="trust-list">
-            <span>Default library: Documents</span>
-            <span>External edit conflict checks</span>
+            <span>Choose a different folder in settings.</span>
+            <span>Review conflicts when a file changes outside Current.</span>
           </div>
         </div>
         <pre className="code-panel tree-panel"><code>{tree}</code></pre>

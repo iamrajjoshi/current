@@ -4,7 +4,6 @@ import { Footer } from "@/components/Footer";
 import { HeroStreamScene } from "@/components/HeroStreamScene";
 import { InstallCTA } from "@/components/InstallCTA";
 import { NavBar } from "@/components/NavBar";
-import { RoadmapSection } from "@/components/RoadmapSection";
 import { StorageSection } from "@/components/StorageSection";
 
 export default function Home() {
@@ -16,7 +15,6 @@ export default function Home() {
         <FeatureGrid />
         <StorageSection />
         <ConfigTeaser />
-        <RoadmapSection />
         <InstallCTA />
       </main>
       <Footer />

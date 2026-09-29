@@ -6,10 +6,9 @@ export function ConfigTeaser() {
     <section className="section config-teaser">
       <div className="shell config-grid">
         <div>
-          <p className="eyebrow">Configuration</p>
-          <h2>Preferences live in config.current.</h2>
+          <h2>Adjust the writing surface.</h2>
           <p>
-            Use a small config file to change the notes folder, editor font, text size, line height, writing width, history range, and autosave delay.
+            Set the editor font, text size, line height and column width in <code>config.current</code>. The same file controls your notes folder, history range and autosave delay.
           </p>
           <Link className="text-link" href="/settings/">
             View the settings reference

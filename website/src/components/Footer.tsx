@@ -5,7 +5,7 @@ export function Footer() {
     <footer className="site-footer">
       <div className="shell footer-inner">
         <Link href="/" className="footer-brand">Current</Link>
-        <p>Daily notes for macOS. Markdown files you can find.</p>
+        <p>Daily Markdown notes for macOS.</p>
         <div>
           <Link href="/settings/">Settings</Link>
           <a href="https://github.com/iamrajjoshi/current" rel="noreferrer">GitHub</a>

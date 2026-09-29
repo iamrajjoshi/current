@@ -1,6 +1,11 @@
 import AppKit
 
 final class MarkdownSyntaxHighlighter {
+    struct Context {
+        var streamLinks: [MarkdownStreamLinks.Link] = []
+        var width: CGFloat
+        var documentURL: URL?
+    }
     private var configuration: CurrentConfiguration
 
     init(configuration: CurrentConfiguration = .default) {
@@ -16,14 +21,14 @@ final class MarkdownSyntaxHighlighter {
     }
 
     private var codeFont: NSFont {
-        CurrentTheme.editorFont(configuration: configuration)
+        CurrentTheme.editorCodeFont(configuration: configuration)
     }
 
     func highlight(_ textStorage: NSTextStorage, selectedRange: NSRange? = nil) {
         let fullRange = NSRange(location: 0, length: textStorage.length)
         guard fullRange.length > 0 else { return }
 
-        highlight(textStorage, in: fullRange, selectedRange: selectedRange)
+        highlight(textStorage, in: fullRange, model: model(for: textStorage), selectedRange: selectedRange)
     }
 
     func highlightAroundEditedRange(
@@ -34,13 +39,11 @@ final class MarkdownSyntaxHighlighter {
         let fullRange = NSRange(location: 0, length: textStorage.length)
         guard fullRange.length > 0 else { return }
 
-        let targetRange = MarkdownEditorRenderModel.decorationRange(
-            around: editedRange ?? fullRange,
-            in: textStorage.string
-        )
+        let model = model(for: textStorage)
+        let targetRange = model.decorationRange(around: editedRange ?? fullRange)
         guard targetRange.length > 0 else { return }
 
-        highlight(textStorage, in: targetRange, selectedRange: selectedRange)
+        highlight(textStorage, in: targetRange, model: model, selectedRange: selectedRange)
     }
 
     func highlightAroundSelectionChange(
@@ -59,24 +62,65 @@ final class MarkdownSyntaxHighlighter {
 
         let clampedRange = NSIntersectionRange(targetRange, fullRange)
         guard clampedRange.length > 0 else { return }
-        highlight(textStorage, in: clampedRange, selectedRange: newSelectedRange)
+        highlight(textStorage, in: clampedRange, model: model(for: textStorage), selectedRange: newSelectedRange)
     }
 
-    private func highlight(_ textStorage: NSTextStorage, in targetRange: NSRange, selectedRange: NSRange?) {
-        let model = MarkdownEditorRenderModel(text: textStorage.string)
+    private func model(for storage: NSTextStorage) -> MarkdownEditorRenderModel {
+        (storage as? MarkdownTextStorage)?.renderModel ?? MarkdownEditorRenderModel(text: storage.string)
+    }
+
+    func highlight(_ textStorage: NSTextStorage, in targetRange: NSRange, model: MarkdownEditorRenderModel, selectedRange: NSRange?, sourceMode: Bool = false, context: Context? = nil) {
         let policy = MarkdownLiveRenderPolicy(model: model, selectedRange: selectedRange)
-        clearTemporaryDecorations(textStorage)
+        let markdownStorage = textStorage as? MarkdownTextStorage
+        let context = context ?? Context(streamLinks: markdownStorage?.resolvedStreamLinks ?? [],
+                                         width: markdownStorage?.renderWidth ?? CGFloat(configuration.contentWidth),
+                                         documentURL: markdownStorage?.documentURL)
+        // Markdown owns persistent source attributes. Temporary attributes
+        // belong to native find, spelling, and input-method presentation;
+        // removing them here can force layout inside a native undo transaction.
         textStorage.beginEditing()
-        textStorage.setAttributes(baseAttributes(), range: targetRange)
+        // Text storage publishes attribute invalidation when its outer editing
+        // transaction closes. Calling invalidateDisplay here can force glyph
+        // generation while NSTextView is still inside beginEditing/endEditing.
+        defer {
+            textStorage.fixFontAttribute(in: targetRange)
+            textStorage.endEditing()
+        }
+        var base = baseAttributes()
+        if sourceMode { base[.font] = codeFont }
+        textStorage.setAttributes(base, range: targetRange)
+        guard !sourceMode else { return }
 
         let protectedRanges = applyProtected(model.protectedRanges, to: textStorage, attributes: [
             .font: codeFont,
-            .foregroundColor: codeColor
+            .foregroundColor: codeColor,
+            .currentCodeBlock: true
         ], targetRange: targetRange)
+        for fence in model.fences {
+            let active = policy.isActive(fence.range)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
+            paragraph.maximumLineHeight = paragraph.minimumLineHeight
+            paragraph.firstLineHeadIndent = 12
+            paragraph.headIndent = 12
+            addAttributes([.paragraphStyle: paragraph], to: textStorage, range: fence.range, limitedTo: targetRange)
+            for boundary in [fence.openingRange, fence.closingRange].compactMap({ $0 }) {
+                if active {
+                    addAttributes([.foregroundColor: syntaxColor], to: textStorage, range: boundary, limitedTo: targetRange)
+                } else {
+                    let padding = NSMutableParagraphStyle()
+                    padding.minimumLineHeight = 8; padding.maximumLineHeight = 8
+                    addAttributes(hiddenSyntaxAttributes(collapsesWidth: false).merging([
+                        .paragraphStyle: padding, .currentFenceBoundary: true
+                    ]) { _, new in new }, to: textStorage, range: boundary, limitedTo: targetRange)
+                }
+            }
+        }
 
-        applyHeadingLines(model: model, to: textStorage, targetRange: targetRange, protectedRanges: protectedRanges)
+        applyHeadingLines(model: model, policy: policy, to: textStorage, targetRange: targetRange, protectedRanges: protectedRanges)
+        applyHeadingSeparators(model: model, policy: policy, to: textStorage, targetRange: targetRange)
         applyGroups(
-            pattern: #"(?m)^(\s*>\s?)(.*)$"#,
+            pattern: #"(?m)^([ \t]*>[ \t]?)(.*)$"#,
             to: textStorage,
             targetRange: targetRange,
             protectedRanges: protectedRanges,
@@ -92,17 +136,18 @@ final class MarkdownSyntaxHighlighter {
             protectedRanges: protectedRanges,
             groups: [(1, [.foregroundColor: syntaxColor])]
         )
-        applyTaskCheckboxes(to: textStorage, targetRange: targetRange, protectedRanges: protectedRanges)
-        applyListParagraphStyles(model: model, to: textStorage, targetRange: targetRange, protectedRanges: protectedRanges)
+        applyTaskCheckboxes(model: model, policy: policy, to: textStorage, targetRange: targetRange)
+        applyListParagraphStyles(model: model, policy: policy, to: textStorage, targetRange: targetRange, protectedRanges: protectedRanges)
+        applyQuotes(model: model, policy: policy, to: textStorage, targetRange: targetRange)
         applyInlineSpans(model: model, policy: policy, to: textStorage, targetRange: targetRange)
+        applyStreamLinks(context.streamLinks, to: textStorage, targetRange: targetRange)
         applyHorizontalRules(model: model, policy: policy, to: textStorage, targetRange: targetRange, protectedRanges: protectedRanges)
-
-        textStorage.endEditing()
-        invalidateDecorationDisplay(textStorage, range: targetRange)
+        MarkdownRichBlocks.apply(model.richBlocks, to: textStorage, targetRange: targetRange, selectedRange: selectedRange,
+                                 width: context.width, configuration: configuration, documentURL: context.documentURL)
     }
 
-    func clearTemporaryDecorations(_ textStorage: NSTextStorage) {
-        let fullRange = NSRange(location: 0, length: textStorage.length)
+    func clearTemporaryDecorations(_ textStorage: NSTextStorage, in range: NSRange? = nil) {
+        let fullRange = range ?? NSRange(location: 0, length: textStorage.length)
         guard fullRange.length > 0 else { return }
 
         for layoutManager in textStorage.layoutManagers {
@@ -208,31 +253,17 @@ final class MarkdownSyntaxHighlighter {
             .strikethroughStyle,
             .obliqueness,
             .spellingState,
-            .markedClauseSegment,
             .backgroundColor,
             .link
         ]
     }
 
-    private func invalidateDecorationDisplay(_ textStorage: NSTextStorage) {
-        let fullRange = NSRange(location: 0, length: textStorage.length)
-        guard fullRange.length > 0 else { return }
-
-        invalidateDecorationDisplay(textStorage, range: fullRange)
-    }
-
-    private func invalidateDecorationDisplay(_ textStorage: NSTextStorage, range: NSRange) {
-        for layoutManager in textStorage.layoutManagers {
-            layoutManager.invalidateDisplay(forCharacterRange: range)
-        }
-    }
-
-    private func listParagraphStyle(prefix: String) -> NSMutableParagraphStyle {
+    private func listParagraphStyle(prefixWidth: CGFloat) -> NSMutableParagraphStyle {
         let paragraph = NSMutableParagraphStyle()
         paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
         paragraph.maximumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
         paragraph.lineBreakMode = .byWordWrapping
-        paragraph.headIndent = ceil((prefix as NSString).size(withAttributes: [.font: baseFont]).width)
+        paragraph.headIndent = ceil(prefixWidth)
         paragraph.firstLineHeadIndent = 0
         return paragraph
     }
@@ -249,6 +280,24 @@ final class MarkdownSyntaxHighlighter {
         return paragraph
     }
 
+    private func applyHeadingSeparators(
+        model: MarkdownEditorRenderModel,
+        policy: MarkdownLiveRenderPolicy,
+        to textStorage: NSTextStorage,
+        targetRange: NSRange
+    ) {
+        for separator in model.headingSeparators {
+            guard rangesIntersect(separator, targetRange), !policy.isActive(separator),
+                  !intersectsProtected(separator, protectedRanges: model.protectedRanges) else { continue }
+            // A single Markdown separator needs less space than an editable
+            // body line. Keep the source and full-height active caret intact.
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.minimumLineHeight = 6
+            paragraph.maximumLineHeight = 6
+            addAttributes([.paragraphStyle: paragraph], to: textStorage, range: separator, limitedTo: targetRange)
+        }
+    }
+
     @discardableResult
     private func applyProtected(
         _ protectedRanges: [NSRange],
@@ -261,26 +310,20 @@ final class MarkdownSyntaxHighlighter {
             guard rangesIntersect(protectedRange, targetRange) else { continue }
             ranges.append(protectedRange)
             addAttributes(attributes, to: textStorage, range: protectedRange, limitedTo: targetRange)
-            if protectedRange.length >= 3 {
-                addAttributes(
-                    [.foregroundColor: syntaxColor],
-                    to: textStorage,
-                    range: NSRange(location: protectedRange.location, length: 3),
-                    limitedTo: targetRange
-                )
-                let closeStart = NSMaxRange(protectedRange) - 3
-                if closeStart >= protectedRange.location {
-                    addAttributes(
-                        [.foregroundColor: syntaxColor],
-                        to: textStorage,
-                        range: NSRange(location: closeStart, length: 3),
-                        limitedTo: targetRange
-                    )
-                }
-            }
+
         }
         return ranges
     }
+
+    private static let groupPatterns: [String: NSRegularExpression] = {
+        let patterns = [
+            #"(?m)^([ \t]*>[ \t]?)(.*)$"#,
+            #"(?m)^([ \t]*(?:[-*+]|\d+\.)(?:[ \t]+\[[ xX]\])?[ \t]+)"#,
+            #"(?m)^[ \t]*(?:[-*+]|\d+\.)[ \t]+(\[[ xX]\])"#,
+            #"(?m)^[ \t]*(?:[-*+]|\d+\.)[ \t]+(\[[xX]\])"#
+        ]
+        return Dictionary(uniqueKeysWithValues: patterns.map { ($0, try! NSRegularExpression(pattern: $0)) })
+    }()
 
     private func applyGroups(
         pattern: String,
@@ -289,10 +332,8 @@ final class MarkdownSyntaxHighlighter {
         protectedRanges: [NSRange],
         groups: [(Int, [NSAttributedString.Key: Any])]
     ) {
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return }
-        let string = textStorage.string as NSString
-        let range = NSRange(location: 0, length: string.length)
-        regex.enumerateMatches(in: textStorage.string, range: range) { match, _, _ in
+        guard let regex = Self.groupPatterns[pattern] else { return }
+        regex.enumerateMatches(in: textStorage.string, range: targetRange) { match, _, _ in
             guard let match else { return }
             guard rangesIntersect(match.range, targetRange) else { return }
             guard !intersectsProtected(match.range, protectedRanges: protectedRanges) else { return }
@@ -306,15 +347,17 @@ final class MarkdownSyntaxHighlighter {
 
     private func applyHeadingLines(
         model: MarkdownEditorRenderModel,
+        policy: MarkdownLiveRenderPolicy,
         to textStorage: NSTextStorage,
         targetRange: NSRange,
         protectedRanges: [NSRange]
     ) {
+        let source = model.text as NSString
         for heading in model.headings {
             guard rangesIntersect(heading.lineRange, targetRange) else { continue }
             guard !intersectsProtected(heading.lineRange, protectedRanges: protectedRanges) else { continue }
             let headingFont = CurrentTheme.editorHeadingFont(level: heading.level, configuration: configuration)
-            let prefix = (textStorage.string as NSString).substring(with: heading.prefixRange)
+            let prefix = source.substring(with: heading.prefixRange)
             let prefixWidth = ceil(prefix.size(withAttributes: [.font: headingFont]).width)
 
             addAttributes(
@@ -323,16 +366,19 @@ final class MarkdownSyntaxHighlighter {
                     .foregroundColor: CurrentTheme.primaryTextColor,
                     .paragraphStyle: headingParagraphStyle(
                         level: heading.level,
-                        prefixWidth: prefixWidth
+                        prefixWidth: policy.isActive(heading.lineRange) ? prefixWidth : 0
                     )
                 ],
                 to: textStorage,
                 range: heading.lineRange,
                 limitedTo: targetRange
             )
+            // Keep a native glyph at the paragraph start. Nulling this prefix
+            // lets incremental layout attach it to the preceding paragraph and
+            // reuse that paragraph's baseline after typing or deleting emoji.
             addAttributes(
-                revealedSyntaxAttributes().merging([
-                    .font: headingFont,
+                (policy.isActive(heading.lineRange) ? revealedSyntaxAttributes() : hiddenSyntaxAttributes(collapsesWidth: false)).merging([
+                    .font: policy.isActive(heading.lineRange) ? headingFont : NSFont.systemFont(ofSize: 0.01),
                     .baselineOffset: CurrentTheme.editorBaselineOffset
                 ]) { _, new in new },
                 to: textStorage,
@@ -387,9 +433,28 @@ final class MarkdownSyntaxHighlighter {
                     .backgroundColor: CurrentTheme.inlineCodeBackgroundColor
                 ], to: textStorage, range: span.contentRange, limitedTo: targetRange)
             case .link:
-                addAttributes([
-                    .foregroundColor: CurrentTheme.accentColor
-                ], to: textStorage, range: span.contentRange, limitedTo: targetRange)
+                var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: CurrentTheme.accentColor]
+                if let syntax = span.syntaxRanges.last {
+                    let raw = (model.text as NSString).substring(with: syntax)
+                    if raw.hasPrefix("]("), raw.hasSuffix(")") {
+                        let destination = String(raw.dropFirst(2).dropLast())
+                        if let url = URL(string: destination), ["https", "http", "mailto"].contains(url.scheme?.lowercased() ?? "") { attributes[.link] = url }
+                    }
+                }
+                addAttributes(attributes, to: textStorage, range: span.contentRange, limitedTo: targetRange)
+            }
+        }
+    }
+
+    private func applyStreamLinks(_ links: [MarkdownStreamLinks.Link], to storage: NSTextStorage, targetRange: NSRange) {
+        for link in links where NSIntersectionRange(link.sourceRange, targetRange).length > 0 {
+            for range in [NSRange(location: link.sourceRange.location, length: 2),
+                          NSRange(location: NSMaxRange(link.sourceRange) - 2, length: 2)] {
+                addAttributes([.foregroundColor: syntaxColor], to: storage, range: range, limitedTo: targetRange)
+            }
+            if let url = URL(string: "inkpad-stream://\(link.target.id.uuidString)") {
+                addAttributes([.link: url, .foregroundColor: CurrentTheme.accentColor], to: storage,
+                              range: link.labelRange, limitedTo: targetRange)
             }
         }
     }
@@ -419,50 +484,79 @@ final class MarkdownSyntaxHighlighter {
         }
     }
 
-    private func applyTaskCheckboxes(
-        to textStorage: NSTextStorage,
-        targetRange: NSRange,
-        protectedRanges: [NSRange]
-    ) {
-        applyGroups(
-            pattern: #"(?m)^[ \t]*(?:[-*+]|\d+\.)[ \t]+(\[[ xX]\])"#,
-            to: textStorage,
-            targetRange: targetRange,
-            protectedRanges: protectedRanges,
-            groups: [
-                (1, [
-                    .font: CurrentTheme.editorBoldFont(configuration: configuration),
-                    .foregroundColor: CurrentTheme.mutedTextColor
-                ])
-            ]
-        )
-        applyGroups(
-            pattern: #"(?m)^[ \t]*(?:[-*+]|\d+\.)[ \t]+(\[[xX]\])"#,
-            to: textStorage,
-            targetRange: targetRange,
-            protectedRanges: protectedRanges,
-            groups: [
-                (1, [
-                    .font: CurrentTheme.editorBoldFont(configuration: configuration),
-                    .foregroundColor: CurrentTheme.accentColor
-                ])
-            ]
-        )
+    private func applyQuotes(model: MarkdownEditorRenderModel, policy: MarkdownLiveRenderPolicy,
+                             to storage: NSTextStorage, targetRange: NSRange) {
+        for quote in model.quotes where rangesIntersect(quote.lineRange, targetRange) {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.minimumLineHeight = CurrentTheme.editorLineHeight(configuration: configuration)
+            paragraph.maximumLineHeight = paragraph.minimumLineHeight
+            paragraph.firstLineHeadIndent = 8
+            paragraph.headIndent = 22
+            addAttributes([.currentQuote: true, .paragraphStyle: paragraph, .foregroundColor: CurrentTheme.secondaryTextColor],
+                          to: storage, range: quote.lineRange, limitedTo: targetRange)
+            if !policy.isActive(quote.lineRange) {
+                addAttributes(hiddenSyntaxAttributes(collapsesWidth: false), to: storage, range: quote.prefixRange, limitedTo: targetRange)
+            }
+        }
+    }
+
+    private func applyTaskCheckboxes(model: MarkdownEditorRenderModel, policy: MarkdownLiveRenderPolicy,
+                                    to storage: NSTextStorage, targetRange: NSRange) {
+        let source = storage.string as NSString
+        for list in model.lists where rangesIntersect(list.lineRange, targetRange) {
+            let prefix = source.substring(with: list.prefixRange) as NSString
+            let opening = prefix.range(of: "[")
+            if opening.location != NSNotFound, opening.location + 3 <= prefix.length {
+                let marker = NSRange(location: list.prefixRange.location + opening.location, length: 3)
+                let checked = source.character(at: marker.location + 1) != 32
+                var attrs: [NSAttributedString.Key: Any] = [.currentTaskCheckbox: checked, .foregroundColor: checked ? CurrentTheme.accentColor : syntaxColor]
+                if !policy.isActive(list.lineRange) {
+                    attrs[.foregroundColor] = NSColor.clear
+                    // Keep [ ], [x], and [X] in one fixed marker gutter even
+                    // when the surrounding paragraph uses proportional type.
+                    attrs[.font] = codeFont
+                    var indentation = 0
+                    while indentation < opening.location, prefix.character(at: indentation) == 32 || prefix.character(at: indentation) == 9 { indentation += 1 }
+                    // Retain a near-zero leading glyph so TextKit recognizes
+                    // the paragraph's first line instead of applying the
+                    // wrapped-line indent after a run of null glyphs.
+                    var leading = hiddenSyntaxAttributes(collapsesWidth: false)
+                    leading[.font] = NSFont.systemFont(ofSize: 0.01)
+                    addAttributes(leading, to: storage,
+                                  range: NSRange(location: list.prefixRange.location + indentation, length: opening.location - indentation), limitedTo: targetRange)
+                }
+                addAttributes(attrs, to: storage, range: marker, limitedTo: targetRange)
+            } else if !policy.isActive(list.lineRange) {
+                let marker = prefix.rangeOfCharacter(from: CharacterSet(charactersIn: "-*+"))
+                if marker.location != NSNotFound {
+                    let advance = (" " as NSString).size(withAttributes: [.font: codeFont]).width
+                    addAttributes([.currentListBullet: true, .foregroundColor: NSColor.clear,
+                                   .font: codeFont, .kern: advance * 2], to: storage,
+                                  range: NSRange(location: list.prefixRange.location + marker.location, length: 1), limitedTo: targetRange)
+                }
+            }
+        }
     }
 
     private func applyListParagraphStyles(
         model: MarkdownEditorRenderModel,
+        policy: MarkdownLiveRenderPolicy,
         to textStorage: NSTextStorage,
         targetRange: NSRange,
         protectedRanges: [NSRange]
     ) {
-        let string = textStorage.string as NSString
+        let source = model.text as NSString
         for list in model.lists {
             guard rangesIntersect(list.lineRange, targetRange) else { continue }
             guard !intersectsProtected(list.lineRange, protectedRanges: protectedRanges) else { continue }
-            let prefix = string.substring(with: list.prefixRange)
+            var prefixWidth: CGFloat = 0
+            textStorage.enumerateAttributes(in: list.prefixRange) { attributes, range, _ in
+                guard attributes[.currentCollapsedMarkdownSyntax] as? Bool != true else { return }
+                prefixWidth += source.substring(with: range)
+                    .size(withAttributes: attributes).width
+            }
             addAttributes(
-                [.paragraphStyle: listParagraphStyle(prefix: prefix)],
+                [.paragraphStyle: listParagraphStyle(prefixWidth: prefixWidth)],
                 to: textStorage,
                 range: list.lineRange,
                 limitedTo: targetRange
@@ -474,41 +568,6 @@ final class MarkdownSyntaxHighlighter {
         protectedRanges.contains { protectedRange in
             NSIntersectionRange(range, protectedRange).length > 0
         }
-    }
-
-    private func decorationRange(around range: NSRange, in text: String) -> NSRange {
-        let nsText = text as NSString
-        let fullRange = NSRange(location: 0, length: nsText.length)
-        guard fullRange.length > 0 else { return fullRange }
-
-        var clampedLocation = min(max(0, range.location), nsText.length)
-        var clampedLength = min(max(0, range.length), nsText.length - clampedLocation)
-        if clampedLength == 0 {
-            if clampedLocation == nsText.length, clampedLocation > 0 {
-                clampedLocation -= 1
-            }
-            clampedLength = 1
-        }
-
-        let editedLineRange = nsText.lineRange(for: NSRange(location: clampedLocation, length: clampedLength))
-        var expandedRange = editedLineRange
-
-        if expandedRange.location > 0 {
-            let previousLineRange = nsText.lineRange(for: NSRange(location: expandedRange.location - 1, length: 0))
-            expandedRange = NSUnionRange(expandedRange, previousLineRange)
-        }
-
-        let nextLocation = NSMaxRange(expandedRange)
-        if nextLocation < nsText.length {
-            let nextLineRange = nsText.lineRange(for: NSRange(location: nextLocation, length: 0))
-            expandedRange = NSUnionRange(expandedRange, nextLineRange)
-        }
-
-        for fencedRange in MarkdownBlockRendering.fencedCodeBlockRanges(in: text) where rangesIntersect(fencedRange, expandedRange) {
-            expandedRange = NSUnionRange(expandedRange, fencedRange)
-        }
-
-        return NSIntersectionRange(expandedRange, fullRange)
     }
 
     private func addAttributes(

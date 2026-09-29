@@ -28,7 +28,22 @@ struct MarkdownVisibleCaret: Equatable {
         }
 
         let selectedLocation = location ?? textView.selectedRange().location
-        let model = MarkdownEditorRenderModel(text: textView.string)
+        guard !textView.hasMarkedText() else { return nil }
+        // TextKit can return an empty screen rect for the insertion point after
+        // a trailing newline. Use its laid-out extra fragment for both drawing
+        // and scroll anchoring, including while the editor is in source mode.
+        if selectedLocation == textView.string.utf16.count,
+           textView.string.isEmpty || textView.string.last?.isNewline == true {
+            layoutManager.ensureLayout(for: textContainer)
+            let extraLine = layoutManager.extraLineFragmentRect
+            if layoutManager.extraLineFragmentTextContainer === textContainer, extraLine.height > 0 {
+                let origin = textView.textContainerOrigin
+                return NSRect(x: origin.x + extraLine.minX, y: origin.y + extraLine.minY,
+                              width: 1, height: extraLine.height)
+            }
+        }
+        guard let storage = textView.textStorage as? MarkdownTextStorage, !storage.sourceMode else { return nil }
+        let model = storage.renderModel
         let visibleLocation = model.visibleInsertionLocation(for: selectedLocation)
         guard let heading = model.heading(at: visibleLocation),
               visibleLocation >= heading.prefixRange.location,

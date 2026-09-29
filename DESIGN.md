@@ -1,312 +1,84 @@
-# Current Design System
+# Current writing workspace
 
-Current is a native macOS daily-stream Markdown editor. Its interface should feel like a warm sheet of paper with just enough structure to help capture, find, and move through time. The design goal is not a full document suite, an IDE, or a decorated notes dashboard. The goal is fast, calm daily writing with transparent plain-text storage.
+Current is a local Markdown workspace centered on daily streams. Open the app, write in today's note, switch context when needed, and find older writing without managing individual files. Standalone notes come later.
 
-This document is implementation-ready guidance for future visual work. It does not define new app behavior, public APIs, or data models.
+## Structure
 
-## Product Intent
+The hierarchy is Library → Folder → Stream → Day. Folders group streams in metadata; moving a stream between folders doesn't move its files. Each stream presents a today-first daily timeline. Tabs are off by default. Ordinary sidebar and picker selection replaces the current stream; only Open in Tab adds a tab. Explicit tabs remain open when the current stream changes.
 
-Current exists for quick capture and continuous review:
+The window uses a native `NavigationSplitView`, a sidebar-styled `List`, and one continuous writing surface with an 8-point top inset. Pinned streams, folders and archive use native rows, selection and disclosure controls. The sidebar is resizable and collapsible, with persisted preferences. A unified native window toolbar hides the app title and provides the stream switcher, Today, a calendar with writing indicators, search, stream creation and view options. There is no persistent footer, calendar rail, or split preview.
 
-- Open the app and immediately write.
-- Keep today's note visually primary.
-- Keep previous days available without making the screen feel busy.
-- Preserve Markdown as plain text on disk, while the editor renders common formatting without visible marker syntax.
-- Make files, native find, and timestamps available through quiet native controls.
-- Avoid UI that asks the user to manage layout before they can write.
+Show the current location as a breadcrumb inside one native toolbar menu pill: `Work › Payments`, or `Library › Daily` for ungrouped streams. The menu lists sibling streams and offers “Switch Stream…” for the full picker; ⌘O remains the direct shortcut. Use the system dropdown indicator, a quiet path separator and bounded labels that prioritize the current stream. The path follows folder moves and renames. Let macOS draw the shared toolbar background, without a custom capsule or material.
 
-The app should feel native, focused, warm, and light. Chrome should be useful but easy to forget. Structure should come from spacing, typography, and hairline dividers, not heavy cards or panels.
+Optional tabs occupy an accessory strip with native selection controls and separate close or pin actions. They support explicit reordering. Closing a tab doesn't archive its stream; closing the last explicit tab hides the strip. Focus mode switches the split view to detail only and hides the native window toolbar and tabs, retaining a small exit button and preserving ordinary view preferences. The timeline and native editors stay in the same detail hierarchy.
 
-## Visual Principles
+Small date labels and disclosure chevrons separate days. Collapsed populated days show a clean excerpt. Empty historical runs fold into a compact date-range row and remain accessible by disclosure or calendar. Don't put cards around notes.
 
-- **Warm paper first:** the default light mode is white and warm-neutral, closer to paper than plastic.
-- **Capture over composition:** Current is for daily stream writing. Do not add document-design controls that compete with typing.
-- **One continuous stream:** day sections are the primary organizing structure. Avoid permanent surfaces that fragment the timeline.
-- **Whisper-weight structure:** use 1px dividers, low-opacity fills, and small typographic shifts instead of heavy borders.
-- **Native restraint:** prefer system materials, system icons, and AppKit text behavior. Custom styling should clarify, not decorate.
-- **No clunky chrome:** no large toolbar blocks, nested cards, loud gradients, oversized labels, or persistent panels that make writing feel secondary.
+## Color and typography
 
-## Color Tokens
+No decorative gradients, glows, simulated glass, or ornamental shadows in app-authored UI or the website. Use solid surfaces and deliberate spacing. Native macOS materials remain system-owned. Labels should help a person act or understand content; remove duplicate headings, promotional empty states, and decorative numbering. Product examples should contain realistic working notes.
 
-Implement tokens in `CurrentTheme` first, then consume them from `ContentView`, `MarkdownEditorView`, and `MarkdownSyntaxHighlighter`.
+Use semantic tokens in `CurrentTheme` for the writing surface. A muted blue accent distinguishes content links and selection. Navigation uses system typography, intrinsic control sizing, selection and materials; don't paint custom sidebar backgrounds or wrap standard toolbar controls in simulated glass. Appearance follows the system unless the user chooses light or dark. Native keyboard focus remains visible. Control feedback respects Reduce Motion; editing geometry never animates.
 
-### Light Mode
-
-| Token | Value | Use |
+| Token | Light | Dark |
 | --- | --- | --- |
-| `pageBackground` | `#FFFFFF` | Main editor canvas and scroll background |
-| `appSurface` | `#F6F5F4` | Subtle app chrome, empty historical space, optional future side surfaces |
-| `chromeBackground` | `rgba(246,245,244,0.82)` | Top and bottom bars, using material when appropriate |
-| `editorBackground` | `#FFFFFF` | `NSTextView` background |
-| `primaryText` | `rgba(0,0,0,0.92)` | Editor text, strong labels, active icons |
-| `secondaryText` | `#615D59` | Stream name, day labels, metadata |
-| `mutedText` | `#A39E98` | Placeholders, inactive historical labels, subtle counts |
-| `divider` | `rgba(0,0,0,0.10)` | Day rules, chrome separators |
-| `softDivider` | `rgba(0,0,0,0.06)` | Internal lines and low-emphasis separators |
-| `fieldBackground` | `rgba(0,0,0,0.035)` | Search field and quiet icon hover state |
-| `fieldBackgroundActive` | `rgba(0,0,0,0.055)` | Search field when focused or populated |
-| `accent` | `#0075DE` | Focus rings, links, selected search hit, rare primary action |
-| `accentSoft` | `#F2F9FF` | Search hit background and gentle status tint |
-
-### Dark Mode
-
-Dark mode is a companion, not the primary visual target. It should remain warm and quiet rather than high-contrast black.
-
-| Token | Value | Use |
-| --- | --- | --- |
-| `pageBackground` | `#1F1E1C` | Main editor canvas |
-| `appSurface` | `#252321` | Chrome and optional future side surfaces |
-| `chromeBackground` | `rgba(37,35,33,0.86)` | Top and bottom bars |
-| `editorBackground` | `#1F1E1C` | `NSTextView` background |
-| `primaryText` | `rgba(255,255,255,0.88)` | Editor text and active icons |
-| `secondaryText` | `rgba(236,232,226,0.64)` | Day labels and metadata |
-| `mutedText` | `rgba(236,232,226,0.42)` | Placeholders and inactive metadata |
-| `divider` | `rgba(255,255,255,0.10)` | Day rules and chrome separators |
-| `softDivider` | `rgba(255,255,255,0.07)` | Internal lines |
-| `fieldBackground` | `rgba(255,255,255,0.055)` | Search and hover fills |
-| `fieldBackgroundActive` | `rgba(255,255,255,0.085)` | Focused or populated search |
-| `accent` | `#62AEF0` | Focus rings, links, selected search hit |
-| `accentSoft` | `rgba(98,174,240,0.14)` | Search hit background |
-
-### Depth
-
-Current should mostly feel flat. Use depth only where the system already expects it.
-
-- Editor canvas: no shadow, no border.
-- Bottom chrome: material or translucent fill plus a 1px separator.
-- Day sections: no card background by default.
-- Search hit: soft tinted rounded rectangle, max radius 8px.
-- Menus, popovers, and future sheets: system elevation is enough.
-- Avoid custom shadow stacks in the main editor. If a future modal needs depth, use a low-opacity native-style shadow and keep it outside the writing stream.
-
-## Typography
-
-Current uses two type systems: monospaced editor text for capture and system sans for chrome.
-
-### Editor
-
-| Token | Value |
-| --- | --- |
-| Font | `.monospacedSystemFont` |
-| Size | `13px` |
-| Weight | regular |
-| Line height | `21px` to `22px` |
-| Baseline offset | Center text optically in the line box |
-| Horizontal inset | `0px` inside the text view, with outer column padding controlled by the timeline |
-| Vertical inset | `8px` |
-
-Guidance:
-
-- Keep editor text monospaced. It reinforces plain text, Markdown, timestamps, lists, and paste-heavy capture.
-- Increase from the current 12px feel to 13px for calmer reading.
-- Use line height to create breathing room rather than increasing paragraph margins in `NSTextView`.
-- Preserve fast typing and native selection behavior. Typography changes must not create cursor jumps or layout churn.
-
-### Markdown Syntax
-
-Syntax highlighting should clarify structure without turning notes into colorful code. Common styling syntax is hidden in the editor while remaining in the saved Markdown text.
-
-| Element | Treatment |
-| --- | --- |
-| Body text | `primaryText`, editor regular font |
-| Markdown markers | heading `#` prefixes stay visible; inline formatting, links, inline code, and inactive horizontal rules hide their markers |
-| Headings | editor font at 14px, semibold, `primaryText` |
-| Bold | editor font semibold |
-| Italic | slight obliqueness, not a separate decorative font |
-| Links | `accent`, no heavy underline while editing |
-| Horizontal rules | 1px `divider`, marker text hidden |
-| Blockquotes | `secondaryText`, optional muted marker |
-| Inline code | editor font, `secondaryText`, soft background no stronger than 6 percent black or 8 percent white |
-| Fenced code | editor font, `secondaryText`, no boxed card surface in edit mode |
-| Checkboxes and list markers | marker muted, content primary |
-
-Headings should be subtly stronger, not oversized. The editor should still feel like one plain-text stream.
-
-The editor is WYSIWYG over Markdown, not rich-text storage. A shared TextKit render model owns block parsing, inline mark parsing, hidden syntax ranges, horizontal-rule state, selection normalization, caret geometry, and measurement. Formatting commands should feel Notion-like: shortcuts toggle one instance of each mark, compatible marks can stack, inline code is exclusive, list/task/heading prefixes are structural, and collapsed shortcuts set pending typing marks rather than inserting visible empty wrappers.
-
-Horizontal rules are native editor block decorations. A literal `---` remains visible while it is incomplete at EOF; pressing Return commits it into exactly one divider line while the note still stores `---`. Divider geometry must be measured and drawn from the same TextKit line-fragment model as the visible editor so typing on the next line does not move the divider or the viewport.
-
-### Chrome
-
-| Role | Size | Weight | Color |
-| --- | --- | --- | --- |
-| Stream label | 11px | medium | `secondaryText` |
-| Search field | 12px | regular | `primaryText` |
-| Icon buttons | 14px to 15px symbol | regular or medium | `secondaryText` |
-| Day label | 11px | semibold | `secondaryText` |
-| Day label tracking | `0.6px` to `0.8px` | uppercase | `secondaryText` |
-| Bottom metadata | 10px | regular | `mutedText` |
-| Tiny action label | 10px | medium | `secondaryText` |
+| Canvas | `#FFFFFF` | `#1E1E20` |
+| Primary text | `#242426` | `#F1F1F3` |
+| Secondary text | `#67676B` | `#B0B0B5` |
+| Muted text | `#737378` | `#A1A1A8` |
+| Divider | `#E6E6E9` | `#3A3A3E` |
+| Accent | `#456F98` | `#97B8D9` |
 
-Use the system sans font for all chrome. Keep labels compact, stable, and easy to scan.
+Body text defaults to a 16-point proportional system font with a 25.6-point line box. Explicit user font settings remain supported. Code uses a monospaced font. Major headings are 26 points, second-level headings 21, and smaller headings 18 by default. Dates use 12-point type; sidebar labels and rows follow the system.
 
-## Layout
+A single complete blank separator after a heading uses a 6-point display line while inactive. The active writing line, trailing blank lines, repeated blank lines, source mode and code retain their normal height. This tightens the reading gap without rewriting Markdown or changing intentional paragraph spacing.
 
-### Window
+The default window is 1180 × 820 points; minimum content size is 820 × 560, plus the native titlebar. The sidebar can resize between 200 and 320 points. Persist its observed geometry and restore the saved width as the initial split-view preference; let the system determine row heights and group spacing. The centered writing column has a configurable 640-point maximum and 32-point outer padding where space allows. Empty editors have a 48-point minimum and grow from measured content. The outer timeline owns vertical scrolling and respects the native window's content boundary.
 
-- Minimum window remains close to `820 x 640`.
-- The main scroll area fills available space.
-- The writing column remains centered.
-- Default content max width should be `680px` to `720px`.
-- Horizontal scroll padding should be generous: `56px` on standard desktop widths.
-- Avoid full-width text. The app should feel spacious even when the window is wide.
+Standard navigation and toolbar components adopt macOS 26 system materials automatically. Guard macOS 26 toolbar spacers and the focus exit button's native glass style by availability, retaining native toolbar spacing and a bordered exit control on macOS 14. [Apple's SwiftUI design guidance](https://developer.apple.com/videos/play/wwdc2025/323/) and [window toolbar API](https://developer.apple.com/documentation/swiftui/windowtoolbarstyle) are the reference for this chrome. Don't apply content-extension effects or additional glass surfaces to the live TextKit document.
 
-### Timeline
+## Markdown presentation
 
-The timeline is the core layout model.
+Markdown source remains canonical. Display attributes, syntax hiding, checkbox clicks, appearance changes, and layout never silently rewrite source.
 
-- Today appears first and should be expanded by default.
-- Historical days with content may expand, but collapsed days should remain lightweight.
-- Empty recent days may stay collapsed and scannable.
-- Older history loads in small in-memory batches as the user scrolls.
-- Empty placeholder days are a bounded runway, not an infinite calendar.
-- Day sections use vertical padding, not card chrome, to separate entries.
-- The day divider is a label plus a hairline that extends across the writing column.
-- Older days load automatically as the user scrolls toward the end of loaded history.
-- Search hit highlighting can softly tint the day section, but should not create a card-like block.
+Inactive content renders cleanly. Headings hide their prefixes; tasks use native checkbox decorations; quotes have a quiet side rule; code uses a subdued background; rules use one hairline. Tables and local images render in place. The active logical line or rich block reveals source for editing. Markdown Source exposes the complete text while preserving the document, selection, and undo stack.
 
-### Editor Surface
+Incomplete or unsupported syntax stays readable. Rich-content failures return to source. No speculative network loads are needed to display local images. Attachments are stored relative to the note's stream and inserted through undoable edits. Short tables fit their contents; long columns receive additional available width and wrap. Measurement and drawing share column offsets, widths and row heights.
 
-- The editor has no visible container.
-- The text view background matches `editorBackground`.
-- Placeholder text uses `mutedText`.
-- Today's empty editor should have a generous minimum height, around `280px`.
-- Non-empty historical editors should use content-driven height with a small minimum, around `64px`.
-- Avoid internal scrollbars inside each day editor. The outer timeline scroll owns vertical movement.
+`[[stream]]` links resolve existing, unambiguous streams; folder-qualified names distinguish duplicate destinations. Native completion preserves undo and leaves source unchanged while previewing or cancelling. Unresolved names and syntax inside code remain literal. Link coloring and muted brackets preserve character geometry.
 
-## Components
+Native input owns composition, selections, spelling, undo, find, and clipboard behavior. Freeze geometry-changing syntax reveal during a selection drag and suspend it during marked text composition. Don't animate text reflow or caret/scroll correction.
 
-### No Persistent Top Bar
+## Rendering architecture
 
-Implementation home: `ContentView.body`.
+Each text storage revision owns a cached source-range render model. The block scanner handles fenced regions in one pass, including unclosed and tilde fences. Inline processing respects protected code regions. Dirty regions combine old and new block boundaries so deleting a delimiter clears stale formatting downstream.
 
-- The default capture surface has no top toolbar.
-- The first visible app content should be whitespace, the current day divider, and the editor.
-- Use native menus and keyboard shortcuts for jump to today, insert timestamp, reveal files, and find.
-- A future stream switcher or expanded search may temporarily occupy the titlebar, but it should not return as permanent chrome in MVP 0.
+A detached attributed source caches rendering plans for logical lines and complete fenced/rich blocks. Edits shift unchanged plans in UTF-16 coordinates; selection, heading-separator context, and rendering settings determine reuse. Compare each requested line with actual native attributes before applying changes. Native font fallback and edit-notification ordering remain part of the rendering contract. Image plans recheck file metadata. See [render-plan validation](docs/render-plan-validation.md) for the measured costs and regression coverage.
 
-### Day Divider
+Line layout reads the cached model. It must not parse the document again. Selection changes update reveal attributes without reparsing unchanged source. Native editors are retained by library/stream/day identity so switching a stream doesn't reset undo ownership. Shared height caches separate active, inactive, source-mode, width, configuration, and document contexts.
 
-Implementation home: `DaySectionView.dayDivider`.
+The timeline uses a single-column collection layout, with row geometry calculated from the same width as editor measurement. Both ordinary and context-based invalidation rebuild its cached frames; scrolling alone doesn't rebuild them. History paging triggers at the boundaries of retained rows, before entering spacer regions.
 
-- Label text is uppercase, semibold, tracked, and compact.
-- Today label format remains `TODAY · WED, APR 29` style.
-- Historical labels omit "Today".
-- Divider line uses `softDivider`.
-- The active day divider shows a tiny save-state orb after the date label: muted when saved, soft accent while saving.
-- Button target should span the full divider row.
-- Collapsing/expanding animation should stay quick, around `0.18s`.
+The current implementation retains TextKit 1. Existing caret and geometry APIs caused automatic fallback when tested with a TextKit 2 surface, so a genuine migration requires the layout and selection bridge to change together. Don't label the current renderer TextKit 2 or claim complete CommonMark compliance for its source-range scanner.
 
-### Editor
+## Retrieval and state
 
-Implementation homes: `MarkdownEditorView`, `MarkdownTextStorage`, `MarkdownEditorRenderModel`, and `MarkdownSyntaxHighlighter`.
+⌘K opens commands, ⌘O switches streams, ⇧⌘F searches history, and ⌘F finds text in the active day. Search results show stream, date, and a clean highlighted excerpt while preserving the exact source range for opening the match. The switcher includes folder context and offers stream creation for unmatched names. Today and date navigation remain scoped to the selected stream. ⇧⌘Return toggles focus mode.
 
-- Use an AppKit `NSTextView`.
-- Preserve native undo, find panel behavior, paste behavior, and keyboard editing.
-- Use `CurrentTheme.editorFont`, `editorLineHeight`, and `editorBaselineOffset`.
-- Use `CurrentTheme.editorBackground` for the text view background.
-- Keep text container line fragment padding at `0`.
-- Do not wrap the text view in a card, panel, or bordered surface.
-- Apply Markdown decorations from the TextKit editing pipeline, scoped to the edited paragraph and adjacent syntax-dependent lines.
-- Keep caret, selection, row-height measurement, and horizontal-rule drawing anchored to the same rendered TextKit geometry.
-- Avoid reconfiguring the active SwiftUI day item on every keystroke; the focused AppKit editor owns local typing state, and the timeline only invalidates layout when rendered height actually changes.
-- Keep formatting rendering incremental, low-contrast, and faithful to the underlying Markdown.
+Remember each stream's active day, selection, scroll anchor, and collapsed days. Empty historical navigation must not create files. Keep history loading bounded and anchor by document identity plus viewport offset, not only total content height.
 
-### No Persistent Bottom Bar
+## Files and trust
 
-Implementation home: `ContentView.body`.
+Documents are identified by library root, stream UUID, and day key. All pending writes retain their original destination. A copied library with the same stream IDs is still a separate live namespace.
 
-- The default capture view does not show a persistent bottom bar.
-- File reveal lives in the Stream menu and keyboard shortcut.
-- Save state belongs to the active day divider, not a separate chrome strip.
+The versioned manifest stores root-relative paths, folder membership, ordering, pins, and archive state. Existing Markdown files and IDs survive migration. Folder and display-name changes are metadata changes. Search is derived from files, and deleting index data must never delete notes.
 
-### History Loading
+Clean buffers can reload external edits. Conflicting dirty buffers retain both versions for review. Normal quit flushes dirty data or stays open after a failed save. Recovery records are debounced by 150 ms, so forced termination before that write completes can lose the newest edits. Save indicators must represent actual canonical file persistence.
 
-Implementation home: `HistoryLoaderView`.
+## Validation
 
-- Do not show a persistent "load older" button in the default stream.
-- Load one small batch of older in-memory days as the user scrolls toward the end of loaded history.
-- Do not create Markdown files for blank days while scrolling.
-- Stop adding blank placeholder dates after the configured runway, then load only older real `.md` files.
-- Disable the invisible loading trigger when there is no older blank runway or real note file left.
-- The trigger may prefill a few bounded batches while its spacer is still visible so short collapsed rows do not stall the scroll.
-- The loading trigger should be invisible and must never chain beyond the bounded history runway or available real files.
-- Keep today's day and dirty days pinned through the cache behavior.
+Run `scripts/validate-local.sh all` for package tests and storage checks. Use `CurrentUIProbe` for isolated real-window rendering and editing checks with screenshots. Inspect both appearances and the minimum window width. The probe must never point at the user's actual library.
 
-## Future Surfaces
+Core regression cases include fence deletion, incomplete syntax, Unicode and marked text, task editing, tables and images, repeated Return near the bottom, source-mode toggles, stream switching with queued saves, independent undo per day, old-note search, relocated libraries, recovery, and external conflicts. Performance claims require measured typing and scrolling traces on defined hardware; a passing screenshot or parser timing isn't enough.
 
-Future roadmap items should extend the design system without turning Current into a heavy workspace shell.
-
-### Multiple Streams
-
-- Stream switching should use a compact popover or native menu first.
-- A persistent sidebar is allowed only when it can be hidden easily and does not reduce the writing column below the target width.
-- Side surfaces use `appSurface`, not a saturated color.
-
-### Search Across History
-
-- Expanded search may use a command-style overlay or popover.
-- Results should be dense, text-first, and date-grouped.
-- Avoid preview cards. Use snippets and day labels.
-
-### Calendar Picker
-
-- Calendar navigation should feel like a lightweight date affordance.
-- Avoid a permanent calendar panel in the default capture view.
-
-### Preview and Export
-
-- Preview should be optional and mode-based.
-- Do not introduce a permanent split preview by default.
-- Rendered Markdown can use proportional reading typography, but edit mode remains monospaced.
-
-### AI Review
-
-- AI features must be opt-in and quiet.
-- Suggestions should appear as review surfaces, not inline surprise rewrites.
-- Any writeback should require user approval.
-
-## Implementation Path
-
-1. Expand `CurrentTheme` into semantic light and dark tokens for page, chrome, editor, text, dividers, fields, and accent.
-2. Update editor typography tokens to 13px with 21px to 22px line height.
-3. Update `ContentView` to consume semantic chrome, search, divider, and text tokens instead of raw opacity values.
-4. Tune `MarkdownSyntaxHighlighter` to hide styling markers while applying semantic visual treatment to the visible content.
-5. Verify the live app in light mode first, then dark mode.
-6. Keep behavior unchanged unless a visual issue reveals an interaction bug.
-
-## Acceptance Checklist
-
-- The app opens to a calm writing surface with today's editor visually primary.
-- Light mode feels warm and paper-like, not cold gray.
-- Dark mode feels warm charcoal, not pure black.
-- No top bar appears in the default capture view.
-- No persistent bottom bar appears in the default capture view.
-- Day dividers are scannable and remain the main timeline structure.
-- Editor text is easier to read than the current 12px baseline.
-- Formatting rendering clarifies Markdown without becoming colorful or busy.
-- No major surface looks like a nested card.
-- Icon buttons remain stable in size and have help text.
-- The writing column remains centered and readable at narrow and wide window sizes.
-
-## Anti-Patterns
-
-- Do not add nested cards inside the timeline.
-- Do not use heavy borders, high-opacity separators, or visible panel outlines around the editor.
-- Do not add large toolbar buttons with text labels to the default capture view.
-- Do not introduce saturated multi-color syntax highlighting.
-- Do not use decorative gradients, blobs, or illustration backgrounds.
-- Do not make search, preview, AI, or future sidebars compete with the daily stream.
-- Do not replace native text editing behavior beyond the small Markdown boundary behaviors needed for hidden syntax.
-- Do not change the saved plain-text Markdown format for visual polish.
-
-## File Ownership
-
-This design system currently maps to these implementation areas:
-
-- `CurrentTheme`: semantic tokens, colors, typography, spacing, and editor metrics.
-- `ContentView`: app shell, timeline, day sections, and history loading trigger.
-- `MarkdownEditorView`: AppKit text view behavior, editor background, insets, cursor, height measurement, and focus.
-- `MarkdownSyntaxHighlighter`: Markdown token styling, line height, heading emphasis, list indentation, and inline code treatment.
-
-Keep design constants centralized in `CurrentTheme` whenever possible. View files should read like composition, not a collection of one-off style decisions.
+The native shell passes 107 package tests plus storage checks, normal and long-document native exercises, and a narrow-window check. Sidebar keyboard focus and saved width restoration are covered; real-app review confirms native toolbar presentation and focus-mode visibility. Long-note viewport changes preserve editor identity, selection and undo. See [the validation record](docs/revamp-validation.md) for results and limitations. The macOS 14 fallback compiles but has not been runtime-tested on macOS 14.

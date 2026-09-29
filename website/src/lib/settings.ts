@@ -22,40 +22,40 @@ export const settings: CurrentSetting[] = [
     category: "Storage",
     defaultValue: "Unset, resolves to ~/Documents/current",
     acceptedValues: "Absolute path, ~/ path, or empty value",
-    description: "Moves the Current library root while keeping daily stream files transparent on disk.",
+    description: "Sets the folder used to store your notes.",
     example: "library-root = ~/Documents/current"
   },
   {
     key: "font-family",
     category: "Editor",
-    defaultValue: "Unset, uses the macOS monospaced system font",
+    defaultValue: "Unset, uses the macOS proportional system font",
     acceptedValues: "Installed font family name, quoted or unquoted",
-    description: "Overrides the editor font family while preserving Current's plain-text editor behavior.",
+    description: "Sets the font used for note text.",
     example: "font-family = \"JetBrains Mono\""
   },
   {
     key: "font-size",
     category: "Editor",
-    defaultValue: "13",
+    defaultValue: "16",
     acceptedValues: "Number from 6 through 72",
-    description: "Controls the AppKit Markdown editor text size.",
-    example: "font-size = 13"
+    description: "Sets the editor text size, in points.",
+    example: "font-size = 16"
   },
   {
     key: "line-height",
     category: "Editor",
-    defaultValue: "22",
+    defaultValue: "25.6",
     acceptedValues: "Number from 8 through 120",
-    description: "Controls the editor line box height for calmer daily writing.",
-    example: "line-height = 22"
+    description: "Sets the height of each line of text, in points.",
+    example: "line-height = 25.6"
   },
   {
     key: "content-width",
     category: "Editor",
-    defaultValue: "700",
+    defaultValue: "640",
     acceptedValues: "Number from 320 through 2000",
     description: "Sets the centered writing column width used by the timeline.",
-    example: "content-width = 700"
+    example: "content-width = 640"
   },
   {
     key: "recent-days",
@@ -78,7 +78,7 @@ export const settings: CurrentSetting[] = [
     category: "Timeline",
     defaultValue: "180",
     acceptedValues: "Integer from 1 through 10000",
-    description: "Controls the retained in-memory timeline window before older rows become spacer height.",
+    description: "Sets how many days stay loaded while scrolling through history.",
     example: "history-window-days = 180"
   },
   {
@@ -86,7 +86,7 @@ export const settings: CurrentSetting[] = [
     category: "Saving",
     defaultValue: "0.55",
     acceptedValues: "Number from 0 through 60",
-    description: "Sets the debounce delay before a dirty day document is written to disk.",
+    description: "Sets how long to wait after typing stops before saving, in seconds.",
     example: "autosave-delay = 0.55"
   },
   {
@@ -100,10 +100,10 @@ export const settings: CurrentSetting[] = [
   {
     key: "markdown-marker-visibility",
     category: "Markdown",
-    defaultValue: "muted",
-    acceptedValues: "muted",
-    description: "Keeps Markdown punctuation visible but visually quiet in the editor.",
-    example: "markdown-marker-visibility = muted"
+    defaultValue: "hidden",
+    acceptedValues: "hidden (legacy muted is treated as hidden)",
+    description: "Hides Markdown punctuation outside the active line. The older muted value uses the same behavior.",
+    example: "markdown-marker-visibility = hidden"
   },
   {
     key: "config-file",
@@ -121,18 +121,18 @@ export const completeConfigSnippet = `# Current configuration
 
 library-root = ~/Documents/current
 font-family =
-font-size = 13
-line-height = 22
-content-width = 700
+font-size = 16
+line-height = 25.6
+content-width = 640
 recent-days = 7
 history-batch-days = 14
 history-window-days = 180
 autosave-delay = 0.55
 hide-empty-weekends = false
-markdown-marker-visibility = muted
+markdown-marker-visibility = hidden
 
 # Split config into another file:
-config-file = extras.current
+# config-file = extras.current
 config-file = ?machine.current`;
 
 export const highlightedSettings = settings.filter((setting) =>

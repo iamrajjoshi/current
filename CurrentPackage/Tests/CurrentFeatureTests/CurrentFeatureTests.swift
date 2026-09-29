@@ -111,7 +111,7 @@ func highlighterClearsStaleDecorationAttributes() {
 }
 
 @Test
-func highlighterClearsTemporaryDecorationAttributes() {
+func highlighterPreservesNativeTemporaryAndIMEAttributes() {
     let storage = NSTextStorage(string: "plain")
     let layoutManager = NSLayoutManager()
     let textContainer = NSTextContainer(size: NSSize(width: 200, height: 200))
@@ -126,10 +126,10 @@ func highlighterClearsTemporaryDecorationAttributes() {
 
     MarkdownSyntaxHighlighter().highlight(storage)
 
-    #expect(layoutManager.temporaryAttribute(.underlineStyle, atCharacterIndex: 0, effectiveRange: nil) == nil)
-    #expect(layoutManager.temporaryAttribute(.underlineColor, atCharacterIndex: 0, effectiveRange: nil) == nil)
-    #expect(layoutManager.temporaryAttribute(.spellingState, atCharacterIndex: 0, effectiveRange: nil) == nil)
-    #expect(layoutManager.temporaryAttribute(.markedClauseSegment, atCharacterIndex: 0, effectiveRange: nil) == nil)
+    #expect(layoutManager.temporaryAttribute(.underlineStyle, atCharacterIndex: 0, effectiveRange: nil) as? Int == NSUnderlineStyle.single.rawValue)
+    #expect(layoutManager.temporaryAttribute(.underlineColor, atCharacterIndex: 0, effectiveRange: nil) as? NSColor == NSColor.systemBlue)
+    #expect(layoutManager.temporaryAttribute(.spellingState, atCharacterIndex: 0, effectiveRange: nil) as? Int == 1)
+    #expect(layoutManager.temporaryAttribute(.markedClauseSegment, atCharacterIndex: 0, effectiveRange: nil) as? Int == 0)
 }
 
 @Test
@@ -170,11 +170,11 @@ func liveModeRevealsMarkdownSyntaxInActiveBlock() {
     let headingPrefixIndex = 0
     let boldMarkerIndex = nsText.range(of: "**").location
 
-    #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: inactiveStorage, at: headingPrefixIndex))
+    #expect(boolAttribute(.currentHiddenMarkdownSyntax, in: inactiveStorage, at: headingPrefixIndex))
     #expect(boolAttribute(.currentHiddenMarkdownSyntax, in: inactiveStorage, at: boldMarkerIndex))
     #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: activeStorage, at: headingPrefixIndex))
     #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: activeStorage, at: boldMarkerIndex))
-    #expect(!foregroundIsClear(in: inactiveStorage, at: headingPrefixIndex))
+    #expect(foregroundIsClear(in: inactiveStorage, at: headingPrefixIndex))
     #expect(!foregroundIsClear(in: activeStorage, at: headingPrefixIndex))
     #expect(!foregroundIsClear(in: activeStorage, at: boldMarkerIndex))
 }
@@ -258,7 +258,7 @@ func highlighterKeepsUncommittedEOFHorizontalRuleVisible() {
 }
 
 @Test
-func highlighterKeepsHeadingSyntaxOnHeadingMetrics() {
+func highlighterKeepsHeadingContentMetricsAndAnInvisiblePrefixAnchor() {
     let text = "# **Heading**"
     let storage = highlightedStorage(text)
     let nsText = text as NSString
@@ -270,11 +270,11 @@ func highlighterKeepsHeadingSyntaxOnHeadingMetrics() {
     let boldMarkerFont = storage.attribute(.font, at: boldMarkerIndex, effectiveRange: nil) as? NSFont
     let contentFont = storage.attribute(.font, at: contentIndex, effectiveRange: nil) as? NSFont
 
-    #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: prefixIndex))
+    #expect(boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: prefixIndex))
     #expect(!boolAttribute(.currentCollapsedMarkdownSyntax, in: storage, at: prefixIndex))
     #expect(boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: boldMarkerIndex))
     #expect(boolAttribute(.currentCollapsedMarkdownSyntax, in: storage, at: boldMarkerIndex))
-    #expect(prefixFont?.pointSize == headingFont.pointSize)
+    #expect(prefixFont?.pointSize == 0.01)
     #expect(boldMarkerFont?.pointSize == headingFont.pointSize)
     #expect(contentFont?.pointSize == headingFont.pointSize)
 }
@@ -400,8 +400,8 @@ func markdownLayoutManagerCollapsesHiddenSyntaxWidth() {
     #expect(hiddenWidth < rawMarkerWidth - 4)
 }
 
-@Test
-func markdownLayoutManagerReservesHiddenHeadingPrefixWidth() {
+@Test @MainActor
+func markdownLayoutManagerCollapsesInactiveHeadingPrefixWidth() {
     let text = "# Heading"
     let hiddenStorage = highlightedStorage(text)
     let activeStorage = highlightedStorage(
@@ -416,8 +416,8 @@ func markdownLayoutManagerReservesHiddenHeadingPrefixWidth() {
     ))
     let hiddenParagraph = hiddenStorage.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
 
-    #expect(abs(hiddenPrefixWidth - activePrefixWidth) < 1)
-    #expect(hiddenPrefixWidth > visibleHeadingWidth + 4)
+    #expect(hiddenPrefixWidth < activePrefixWidth - 4)
+    #expect(abs(hiddenPrefixWidth - visibleHeadingWidth) < 1)
     #expect(hiddenParagraph?.firstLineHeadIndent == 0)
 }
 
@@ -611,7 +611,7 @@ func markdownEditorRenderModelCollectsSharedDecorationFacts() {
 func markdownTextStorageDecoratesDuringTextKitEditing() {
     let storage = MarkdownTextStorage(string: "# Heading")
 
-    #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: 0))
+    #expect(boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: 0))
 
     storage.replaceCharacters(in: NSRange(location: 0, length: 2), with: "")
 
@@ -628,10 +628,10 @@ func markdownTextStorageRedecoratesActiveBlocksOnSelectionChanges() {
 
     storage.updateSelectedRange(NSRange(location: 2, length: 0))
     #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: 0))
-    #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: secondPrefixLocation))
+    #expect(boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: secondPrefixLocation))
 
     storage.updateSelectedRange(NSRange(location: secondPrefixLocation + 3, length: 0))
-    #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: 0))
+    #expect(boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: 0))
     #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: secondPrefixLocation))
 }
 
@@ -698,7 +698,7 @@ func scopedHighlighterClearsStaleDecorationsOnEditedLine() {
     let storage = NSTextStorage(string: "# Heading\nBody")
     highlighter.highlight(storage)
 
-    #expect(!boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: 0))
+    #expect(boolAttribute(.currentHiddenMarkdownSyntax, in: storage, at: 0))
 
     storage.replaceCharacters(in: NSRange(location: 0, length: 2), with: "")
     highlighter.highlightAroundEditedRange(storage, editedRange: NSRange(location: 0, length: 0))

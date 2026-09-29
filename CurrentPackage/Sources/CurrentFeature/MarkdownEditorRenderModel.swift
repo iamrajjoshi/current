@@ -34,6 +34,7 @@ enum MarkdownLiveBlockKind: Equatable {
     case list
     case horizontalRule
     case fencedCodeBlock
+    case richBlock
 }
 
 struct MarkdownLiveBlock: Equatable {
@@ -54,14 +55,42 @@ struct MarkdownEditorRenderModel {
     var lists: [MarkdownBlockRendering.ListLine]
     var horizontalRules: [MarkdownBlockRendering.HorizontalRuleDisplayState]
     var inlineSpans: [MarkdownInlineRendering.Span]
+    var fences: [MarkdownBlockRendering.CodeFence]
+    var quotes: [MarkdownBlockRendering.QuoteLine]
+    var richBlocks: [MarkdownRichBlocks.Block]
+    var headingSeparators: [NSRange]
+    private var headingsByLine: [Int: MarkdownBlockRendering.HeadingLine]
+    private var listsByLine: [Int: MarkdownBlockRendering.ListLine]
+    private var rulesByLine: [Int: MarkdownBlockRendering.HorizontalRuleDisplayState]
 
     init(text: String) {
         self.text = text
-        self.protectedRanges = MarkdownBlockRendering.fencedCodeBlockRanges(in: text)
-        self.headings = MarkdownBlockRendering.headingLines(in: text)
-        self.lists = MarkdownBlockRendering.listLines(in: text)
-        self.horizontalRules = MarkdownBlockRendering.horizontalRuleDisplayStates(in: text)
+        let blocks = MarkdownBlockRendering.parse(in: text)
+        self.fences = blocks.fences
+        self.protectedRanges = blocks.fences.map(\.range)
+        self.headings = blocks.headings
+        self.lists = blocks.lists
+        self.horizontalRules = blocks.horizontalRules
+        self.quotes = blocks.quotes
+        self.richBlocks = MarkdownRichBlocks.blocks(in: text, protectedRanges: protectedRanges)
         self.inlineSpans = MarkdownInlineRendering.spans(in: text, protectedRanges: protectedRanges)
+        let source = text as NSString
+        self.headingSeparators = headings.compactMap { heading in
+            let start = NSMaxRange(heading.lineRange)
+            guard heading.hasContent, start < source.length else { return nil }
+            let separator = source.lineRange(for: NSRange(location: start, length: 0))
+            let next = NSMaxRange(separator)
+            let separatorText = source.substring(with: separator)
+            guard separatorText.last?.isNewline == true,
+                  separatorText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  next < source.length,
+                  !source.substring(with: source.lineRange(for: NSRange(location: next, length: 0)))
+                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+            return separator
+        }
+        self.headingsByLine = Dictionary(uniqueKeysWithValues: headings.map { ($0.lineRange.location, $0) })
+        self.listsByLine = Dictionary(uniqueKeysWithValues: lists.map { ($0.lineRange.location, $0) })
+        self.rulesByLine = Dictionary(uniqueKeysWithValues: horizontalRules.map { ($0.horizontalRule.lineRange.location, $0) })
     }
 
     var blockNodes: [MarkdownBlockNode] {
@@ -107,15 +136,15 @@ struct MarkdownEditorRenderModel {
     }
 
     func heading(at location: Int) -> MarkdownBlockRendering.HeadingLine? {
-        headings.first { containsOrTouches($0.lineRange, location: location) }
+        headingsByLine[lineStart(at: location)]
     }
 
     func list(at location: Int) -> MarkdownBlockRendering.ListLine? {
-        lists.first { containsOrTouches($0.lineRange, location: location) }
+        listsByLine[lineStart(at: location)]
     }
 
     func horizontalRule(at location: Int) -> MarkdownBlockRendering.HorizontalRuleDisplayState? {
-        horizontalRules.first { containsOrTouches($0.horizontalRule.lineRange, location: location) }
+        rulesByLine[lineStart(at: location)]
     }
 
     func structuralContentRange(at location: Int) -> NSRange? {
@@ -142,7 +171,11 @@ struct MarkdownEditorRenderModel {
             )
         }
 
-        if let heading = headings.first(where: { $0.lineRange.location == lineRange.location }) {
+        if let richBlock = richBlocks.first(where: { NSIntersectionRange($0.range, lineRange).length > 0 }) {
+            return MarkdownLiveBlock(kind: .richBlock, lineRange: richBlock.range, visibleContentRange: richBlock.range, hideableSyntaxRanges: [])
+        }
+
+        if let heading = headingsByLine[lineRange.location] {
             return MarkdownLiveBlock(
                 kind: .heading,
                 lineRange: heading.lineRange,
@@ -151,7 +184,7 @@ struct MarkdownEditorRenderModel {
             )
         }
 
-        if let list = lists.first(where: { $0.lineRange.location == lineRange.location }) {
+        if let list = listsByLine[lineRange.location] {
             return MarkdownLiveBlock(
                 kind: .list,
                 lineRange: list.lineRange,
@@ -160,7 +193,7 @@ struct MarkdownEditorRenderModel {
             )
         }
 
-        if let horizontalRule = horizontalRules.first(where: { $0.horizontalRule.lineRange.location == lineRange.location }) {
+        if let horizontalRule = rulesByLine[lineRange.location] {
             return MarkdownLiveBlock(
                 kind: .horizontalRule,
                 lineRange: horizontalRule.horizontalRule.lineRange,
@@ -259,6 +292,10 @@ struct MarkdownEditorRenderModel {
     }
 
     static func decorationRange(around range: NSRange, in text: String) -> NSRange {
+        MarkdownEditorRenderModel(text: text).decorationRange(around: range)
+    }
+
+    func decorationRange(around range: NSRange) -> NSRange {
         let nsText = text as NSString
         let fullRange = NSRange(location: 0, length: nsText.length)
         guard fullRange.length > 0 else { return fullRange }
@@ -286,7 +323,7 @@ struct MarkdownEditorRenderModel {
             expandedRange = NSUnionRange(expandedRange, nextLineRange)
         }
 
-        for fencedRange in MarkdownBlockRendering.fencedCodeBlockRanges(in: text)
+        for fencedRange in protectedRanges + richBlocks.map(\.range)
             where NSIntersectionRange(fencedRange, expandedRange).length > 0 {
             expandedRange = NSUnionRange(expandedRange, fencedRange)
         }
@@ -317,11 +354,8 @@ struct MarkdownEditorRenderModel {
             .flatMap(\.syntaxRanges)
     }
 
-    private func containsOrTouches(_ range: NSRange, location: Int) -> Bool {
-        if location == NSMaxRange(range) {
-            return location == (text as NSString).length
-        }
-        return location >= range.location && location < NSMaxRange(range)
+    private func lineStart(at location: Int) -> Int {
+        Self.caretLineRange(at: location, in: text as NSString).location
     }
 
     private func isValid(_ range: NSRange, in text: NSString) -> Bool {
