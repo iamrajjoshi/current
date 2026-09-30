@@ -1379,13 +1379,20 @@ struct CurrentFeatureChecks {
         )
         controller.bootstrapIfNeeded(now: now)
 
-        controller.updateText(for: now, text: "# Meeting\n\n- [ ] Follow up")
-        try await Task.sleep(nanoseconds: 130_000_000)
-
         let todayPath = root.appendingPathComponent("streams/daily/2026/04/2026-04-29.md")
         let yesterdayPath = root.appendingPathComponent("streams/daily/2026/04/2026-04-28.md")
+        let expectedText = "# Meeting\n\n- [ ] Follow up"
+        controller.updateText(for: now, text: expectedText)
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(5))
+        // Await the observable write without forcing a save. A fixed delay
+        // races the debounced task and filesystem scheduling on CI runners.
+        while (try? String(contentsOf: todayPath, encoding: .utf8)) != expectedText,
+              clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
         let savedText = try String(contentsOf: todayPath, encoding: .utf8)
-        try check(savedText == "# Meeting\n\n- [ ] Follow up", "Autosave did not write today's content")
+        try check(savedText == expectedText, "Autosave did not write today's content")
         try check(!FileManager.default.fileExists(atPath: yesterdayPath.path), "Autosave created an untouched previous day")
     }
 

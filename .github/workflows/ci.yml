@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   test:
     runs-on: macos-latest
@@ -20,20 +24,31 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v5
 
-      - name: Install XcodeBuildMCP
-        run: npm install --global xcodebuildmcp@2.3.2
+      - name: Validate release scripts
+        run: |
+          bash -n scripts/notarize-app.sh scripts/update-homebrew-cask.sh
+          python3 -B -m unittest discover -s scripts/tests -p 'test_*.py'
 
-      - name: Run Swift package tests
-        run: xcodebuildmcp swift-package test --package-path CurrentPackage
+      - name: Run Swift package tests and feature checks
+        run: scripts/validate-local.sh all 2>&1 | tee "$RUNNER_TEMP/package-tests.log"
 
-      - name: Run feature checks
-        run: xcodebuildmcp swift-package run --package-path CurrentPackage --executable-name CurrentFeatureChecks
+      - name: Preserve package test diagnostics
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-test-diagnostics
+          path: |
+            ${{ runner.temp }}/package-tests.log
+            ~/Library/Logs/DiagnosticReports/*testing*.ips
+            ~/Library/Logs/DiagnosticReports/*CurrentFeature*.ips
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build macOS app
-        run: xcodebuildmcp macos build --workspace-path Current.xcworkspace --scheme Current
+        run: xcodebuild -workspace Current.xcworkspace -scheme Current -destination 'platform=macOS' build
 
       - name: Run macOS tests
-        run: xcodebuildmcp macos test --workspace-path Current.xcworkspace --scheme Current
+        run: xcodebuild -workspace Current.xcworkspace -scheme Current -destination 'platform=macOS' test
 
   website:
     runs-on: ubuntu-latest

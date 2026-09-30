@@ -4,6 +4,11 @@ set -euo pipefail
 VERSION="${1:?Usage: scripts/update-homebrew-cask.sh <version> <zip-path>}"
 ZIP_PATH="${2:?Usage: scripts/update-homebrew-cask.sh <version> <zip-path>}"
 
+if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "Version must use the numeric x.y.z format: $VERSION" >&2
+  exit 1
+fi
+
 if [[ ! -f "$ZIP_PATH" ]]; then
   echo "Zip not found: $ZIP_PATH"
   exit 1
@@ -23,6 +28,29 @@ cleanup() {
 trap cleanup EXIT
 
 git clone https://github.com/iamrajjoshi/homebrew-tap.git "$TEMP_DIR"
+
+OBSOLETE_VERSION="$(python3 - "$VERSION" "$TEMP_DIR/Casks/current.rb" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+try:
+    cask = Path(sys.argv[2]).read_text()
+except OSError as error:
+    sys.exit(f"Cannot read current Homebrew cask version: {error}")
+versions = re.findall(r'^\s*version\s+"([^"]+)"\s*$', cask, re.MULTILINE)
+if len(versions) != 1 or not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", versions[0]):
+    sys.exit("Cannot parse current Homebrew cask version; expected one numeric x.y.z version")
+current = versions[0]
+if tuple(map(int, sys.argv[1].split("."))) < tuple(map(int, current.split("."))):
+    print(current)
+PY
+)"
+if [[ -n "$OBSOLETE_VERSION" ]]; then
+  echo "Skipping obsolete v${VERSION}; Homebrew cask is already v${OBSOLETE_VERSION}"
+  exit 0
+fi
+
 if [[ "${DRY_RUN:-}" != "1" ]]; then
   git -C "$TEMP_DIR" remote set-url origin "https://x-access-token:${HOMEBREW_TAP_TOKEN}@github.com/iamrajjoshi/homebrew-tap.git"
 fi
@@ -35,7 +63,7 @@ cask "current" do
 
   url "https://github.com/iamrajjoshi/current/releases/download/v#{version}/Current-#{version}.zip"
   name "Current"
-  desc "Daily notes in a single stream"
+  desc "Daily Markdown notes organized in streams"
   homepage "https://github.com/iamrajjoshi/current"
 
   depends_on macos: ">= :sonoma"

@@ -93,8 +93,14 @@ struct WorkspaceAnchorCaptureTests {
 
         let (originalWindow, originalHost) = mount(controller: controller)
         defer { originalWindow.close() }
-        try await settle(originalHost)
+        try await waitUntil(originalHost, "The original timeline must publish and lay out its three rows") {
+            guard let collection: NSCollectionView = find(in: originalHost), hasThreeRows(collection) else { return false }
+            let mountedEditors = editors(in: collection)
+            return collection.alphaValue == 1 && !mountedEditors.isEmpty
+                && mountedEditors.allSatisfy(\.isGeometrySettled)
+        }
         let originalCollection: NSCollectionView = try #require(find(in: originalHost))
+        try #require(hasThreeRows(originalCollection))
         let todayRow = try #require(originalCollection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0)))
         let olderRow = try #require(originalCollection.layoutAttributesForItem(at: IndexPath(item: 2, section: 0)))
         let expectedViewportY = olderRow.frame.minY + 120
@@ -117,8 +123,15 @@ struct WorkspaceAnchorCaptureTests {
         #expect(abs((reopened.scrollRequest?.offset ?? -1) - legacyOffset) < 0.001)
         let (window, host) = mount(controller: reopened, restoresRequest: true)
         defer { window.close() }
-        try await settle(host)
+        try await waitUntil(host, "The restored timeline must finish older-note layout and selection restoration") {
+            guard let collection: NSCollectionView = find(in: host), hasThreeRows(collection),
+                  let item = collection.item(at: IndexPath(item: 2, section: 0)),
+                  let editor: MarkdownTextView = find(in: item.view) else { return false }
+            return collection.alphaValue == 1 && editor.isGeometrySettled && editor.visibleRect.height > 0
+                && editor.selectedRange() == NSRange(location: 14, length: 5)
+        }
         let collection: NSCollectionView = try #require(find(in: host))
+        try #require(hasThreeRows(collection))
         let scrollView = try #require(collection.enclosingScrollView)
         #expect(abs((reopened.scrollRequest?.offset ?? -1) - legacyOffset) < 0.001)
         let restoredOlderRow = try #require(collection.layoutAttributesForItem(at: IndexPath(item: 2, section: 0)))
@@ -148,6 +161,27 @@ struct WorkspaceAnchorCaptureTests {
         return (window, host)
     }
 
+    private func hasThreeRows(_ collection: NSCollectionView) -> Bool {
+        // AppKit raises an Objective-C exception for an out-of-bounds layout
+        // query, which #require cannot catch. Validate its published counts first.
+        guard collection.numberOfSections == 1, collection.numberOfItems(inSection: 0) == 3 else { return false }
+        return (0..<3).allSatisfy { index in
+            guard let row = collection.layoutAttributesForItem(at: IndexPath(item: index, section: 0)) else { return false }
+            return row.frame.width > 0 && row.frame.height > 0
+        }
+    }
+
+    private func waitUntil(_ view: NSView, _ reason: String, condition: () -> Bool) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(10))
+        repeat {
+            view.layoutSubtreeIfNeeded()
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        } while clock.now < deadline
+        try #require(condition(), "\(reason)")
+    }
+
     private func settle(_ view: NSView) async throws {
         for _ in 0..<20 {
             view.layoutSubtreeIfNeeded()
@@ -158,6 +192,11 @@ struct WorkspaceAnchorCaptureTests {
     private func find<T: NSView>(in view: NSView) -> T? {
         if let result = view as? T { return result }
         return view.subviews.lazy.compactMap { find(in: $0) as T? }.first
+    }
+
+    private func editors(in view: NSView) -> [MarkdownTextView] {
+        if let editor = view as? MarkdownTextView { return [editor] }
+        return view.subviews.flatMap { editors(in: $0) }
     }
 
     private struct Fixture: View {

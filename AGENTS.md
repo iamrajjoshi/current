@@ -10,10 +10,12 @@
 
 ## Releases
 
-- Releases are manual only. Use the `Release` GitHub Actions workflow (`.github/workflows/release.yml`) with a `version` input like `0.1.0`.
+- Releases are manual only. Use the `Release` GitHub Actions workflow (`.github/workflows/release.yml`) with an `x.y.z` version input. The next planned version is `0.3.0`.
 - PRs and pushes should not create app releases. The regular `CI` workflow is the PR/push validation path.
-- The release workflow builds `Current.app`, packages `Current-<version>.zip`, creates a GitHub Release at `v<version>`, and updates the Homebrew cask.
-- Release artifacts are unsigned and not notarized for now. macOS may show normal unsigned-app first-launch friction.
+- New releases require a Developer ID Application signature, hardened runtime, secure timestamp, accepted Apple notarization, and a stapled ticket. There is no unsigned fallback.
+- The workflow validates the final ZIP before publishing `Current-<version>.zip` and its checksum at `v<version>`. A separate Homebrew job downloads those published bytes and verifies the checksum before updating the cask; rerun failed jobs to retry that update without rebuilding the app.
+- Version `0.2.0` remains unsigned. The signed `0.3.0` workflow is prepared, but signing and publication require the Apple credentials listed in [docs/releases.md](docs/releases.md). Do not describe it as a validated or published signed release until that run succeeds.
+- Dispatch from the intended branch explicitly; releasing does not imply merging that branch. Never put signing certificates, private keys, or passwords in the repository or chat.
 - The app repository is public so Homebrew can download GitHub Release artifacts without authentication.
 
 ## Homebrew

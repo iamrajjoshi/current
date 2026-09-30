@@ -120,7 +120,6 @@ public struct ContentView: View {
                 Text(WorkspaceDateLabel.title(for: visibleDate, relativeTo: controller.today))
                     .monospacedDigit()
                     .lineLimit(1)
-                    .frame(width: 144)
             }
             .popover(isPresented: $workspace.showsDatePicker) {
                 WorkspaceCalendar(controller: controller, workspace: workspace)

@@ -79,6 +79,10 @@ The public routes are `/` for the landing page and `/settings/` for the configur
 
 Pushes to `main` deploy the static export to GitHub Pages with `.github/workflows/pages.yml`.
 
+### Releases and upgrades
+
+Releases run manually through GitHub Actions. The prepared `0.3.0` workflow requires Developer ID signing and Apple notarization; the existing `0.2.0` release is unsigned. See [Release setup and upgrade instructions](docs/releases.md) for credentials, branch selection, validation gates, and Homebrew retries.
+
 ### Build and validate
 
 Open `Current.xcworkspace` in Xcode to build the app. Package validation can also run with Command Line Tools:
