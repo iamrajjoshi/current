@@ -8,6 +8,49 @@ private var historyCalendar: Calendar {
     return calendar
 }
 
+@Test(arguments: [false, true]) @MainActor
+func rebuildingRecentHistoryRetainsAlreadyVisibleImportedNotes(refreshFromDisk: Bool) throws {
+    let calendar = historyCalendar
+    let today = calendar.date(from: DateComponents(year: 2026, month: 9, day: 27))!
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("current-recent-imports-\(UUID().uuidString)")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = StreamStore(libraryRoot: root, calendar: calendar)
+    var stream = try store.defaultStream()
+    stream.createdAt = today
+    try store.saveLibrary(streams: [stream], folders: [])
+    let imported = [3, 40, 400].map { calendar.addingDays(-$0, to: today) }
+    for date in imported {
+        var document = try store.loadDay(date, in: stream)
+        document.text = "Imported note \(document.dayKey)"
+        document.isDirty = true
+        try store.saveDay(document)
+    }
+    let controller = TimelineController(store: store, recentDayCount: 4, now: today)
+    controller.bootstrapIfNeeded(now: today)
+    let expected = [today] + imported
+    #expect(controller.days.map(\.date) == expected)
+    for _ in 0..<3 {
+        if refreshFromDisk { controller.refreshExternalChanges() }
+        else { controller.jumpToToday() }
+        #expect(controller.days.map(\.date) == expected)
+        #expect(Set(controller.days.map(\.id)).count == controller.days.count)
+        #expect(controller.activeDate == today)
+    }
+
+    // Refresh also merges a newly imported note without dropping retained ones.
+    let added = calendar.addingDays(-10, to: today)
+    let url = store.dayURL(for: added, in: stream)
+    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try "An externally imported note".write(to: url, atomically: true, encoding: .utf8)
+    controller.refreshExternalChanges()
+    #expect(controller.days.map(\.date) == [today, imported[0], added, imported[1]])
+    #expect(controller.canLoadOlderDays)
+    #expect(controller.loadOlderWindow())
+    #expect(controller.days.map(\.date) == [today, imported[0], added, imported[1], imported[2]])
+    #expect(Set(controller.days.map(\.id)).count == controller.days.count)
+    #expect(!controller.canLoadOlderDays)
+}
+
 @Test @MainActor
 func fiveYearsOfImportedHistoryCanPageBothDirectionsWithBoundedDocuments() throws {
     let calendar = historyCalendar

@@ -1015,9 +1015,19 @@ struct CurrentUIProbe {
                                          workspace: WorkspaceViewState, checks: inout [String]) throws -> [String: Any] {
         let sidebarWasVisible = workspace.sidebarVisible
         let tabsWereVisible = workspace.showsTabs
+        let workspaceFrame = window.frame
+        let sidebarWidth = descendants(in: host).compactMap { $0 as? NSSplitView }
+            .first(where: \.isVertical)?.arrangedSubviews.first?.bounds.width
+        func requireWindowFrame(_ stage: String) throws {
+            let frame = window.frame
+            try require(abs(frame.minX - workspaceFrame.minX) < 1 && abs(frame.minY - workspaceFrame.minY) < 1
+                        && abs(frame.width - workspaceFrame.width) < 1 && abs(frame.height - workspaceFrame.height) < 1,
+                        "Sidebar/focus \(stage) changed the outer window: expected=\(workspaceFrame), actual=\(frame)")
+        }
         workspace.sidebarVisible = false
         workspace.showsTabs = false
         settle(window)
+        try requireWindowFrame("hide")
         guard let collection = descendants(in: host).compactMap({ $0 as? NSCollectionView }).first,
               let clip = collection.enclosingScrollView?.contentView,
               let editor = editors(in: host).first(where: { $0.string.contains("Payments sync") && $0.visibleRect.height > 0 }),
@@ -1065,11 +1075,39 @@ struct CurrentUIProbe {
         settle(window)
         try requireCaret("on exit")
         try require(abs(clip.bounds.width - beforeSize.width) < 1, "Leaving focus changed width in the height-only fixture")
+        try require(!workspace.sidebarVisible, "Leaving focus changed the saved hidden-sidebar preference")
+        try requireWindowFrame("hidden-sidebar focus exit")
         workspace.sidebarVisible = sidebarWasVisible
         workspace.showsTabs = tabsWereVisible
         settle(window)
+        try requireWindowFrame("restore sidebar")
+        if sidebarWasVisible {
+            let selection = editor.selectedRange()
+            for cycle in 0..<2 {
+                workspace.sidebarVisible = false
+                settle(window)
+                try requireWindowFrame("repeat hide \(cycle)")
+                workspace.sidebarVisible = true
+                settle(window)
+                try requireWindowFrame("repeat show \(cycle)")
+                try requireCaret("after sidebar round trip \(cycle)")
+            }
+            workspace.focusMode = true
+            settle(window)
+            try requireWindowFrame("visible-sidebar focus entry")
+            try require(workspace.sidebarVisible, "Entering focus changed the saved visible-sidebar preference")
+            workspace.focusMode = false
+            settle(window)
+            try requireWindowFrame("visible-sidebar focus exit")
+            try requireCaret("after visible-sidebar focus")
+            let restoredWidth = descendants(in: host).compactMap { $0 as? NSSplitView }
+                .first(where: \.isVertical)?.arrangedSubviews.first?.bounds.width
+            try require(restoredWidth == sidebarWidth && editor.selectedRange() == selection,
+                        "Sidebar/focus round trips changed the divider width or caret selection")
+        }
         try require(editor.string == source && controller.flushAllSaves(), "Focus-height fixture changed saved source")
         checks.append("height-only viewport changes with sidebar hidden retained bottom-of-note caret, typing, and undo")
+        checks.append("sidebar and focus round trips preserved the outer window, divider width, caret, and sidebar preference")
         return ["beforeViewport": [beforeSize.width, beforeSize.height], "focusViewport": [focusSize.width, focusSize.height],
                 "nativeFocusChangedHeight": nativeFocusChangedHeight,
                 "method": nativeFocusChangedHeight ? "Window toolbar visibility" : "Explicit native window resize; WindowGroup toolbar visibility requires real-app QA"]

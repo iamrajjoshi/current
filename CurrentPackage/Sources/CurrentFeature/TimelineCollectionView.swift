@@ -920,7 +920,10 @@ extension TimelineCollectionView {
                 selectionLength: selection?.length ?? parent.viewState.selectionLength,
                 minimizedDayKeys: Set(parent.minimizedDayIDs.compactMap { $0.split(separator: "|").last.map(String.init) }),
                 readingAnchor: anchor.readingAnchor,
-                editorHadFocus: captureActiveEditorCaretAnchor(visibleOnly: true)?.wasFirstResponder == true
+                editorHadFocus: captureActiveEditorCaretAnchor(visibleOnly: true)?.wasFirstResponder == true,
+                visibleDayKey: captureFirstVisibleDayAnchor(contentOnly: true).flatMap { visible in
+                    parent.days.first(where: { $0.id == visible.dayID })?.dayKey
+                }
             )
             parent.onViewStateChange(state)
         }
@@ -1015,7 +1018,8 @@ extension TimelineCollectionView {
             return visibleRect.minY < attributes.frame.minY + CurrentTheme.historyPreloadDistance
         }
 
-        private func captureFirstVisibleDayAnchor(preferring retainedIDs: Set<String>? = nil) -> ScrollAnchor? {
+        private func captureFirstVisibleDayAnchor(preferring retainedIDs: Set<String>? = nil,
+                                                 contentOnly: Bool = false) -> ScrollAnchor? {
             guard let collectionView,
                   let scrollView else { return nil }
 
@@ -1027,6 +1031,7 @@ extension TimelineCollectionView {
                 return lhsY < rhsY
             }
 
+            var paddingAnchor: ScrollAnchor?
             for indexPath in sortedIndexPaths where indexPath.item < items.count {
                 let item = items[indexPath.item]
                 let dayID: String?
@@ -1036,16 +1041,57 @@ extension TimelineCollectionView {
                 guard let dayID, retainedIDs?.contains(dayID) != false,
                       let attributes = collectionView.layoutAttributesForItem(at: indexPath),
                       attributes.frame.intersects(visibleRect) else { continue }
-                return ScrollAnchor(
+                let anchor = ScrollAnchor(
                     dayID: dayID,
                     offsetFromVisibleTop: visibleRect.minY - attributes.frame.minY,
                     rowHeight: attributes.frame.height,
                     itemIdentity: item.identity,
-                    readingAnchor: readingAnchor(forDayID: dayID)
+                    readingAnchor: contentOnly ? nil : readingAnchor(forDayID: dayID)
                 )
+                // The toolbar follows content; restoration keeps the original
+                // geometric row anchor, including its whitespace. Rebasing to
+                // the next row could produce a negative offset that clamps
+                // when that row starts a freshly opened history window.
+                if !contentOnly || visibleContentFrame(for: item, frame: attributes.frame).intersects(visibleRect) {
+                    return anchor
+                }
+                if paddingAnchor == nil { paddingAnchor = anchor }
             }
 
-            return nil
+            // At the end of the timeline there may only be padding visible.
+            return paddingAnchor
+        }
+
+        private func visibleContentFrame(for item: TimelineCollectionItem, frame: NSRect) -> NSRect {
+            guard case .day(let document) = item else { return frame }
+            let hasText = MarkdownBlockRendering.hasRenderedContent(in: document.text)
+            let expanded = !effectiveIsMinimized(document)
+                && (Calendar.current.isDate(document.date, inSameDayAs: parent.today)
+                    || document.id == parent.activeDayID || hasText)
+            let topPadding = expanded || hasText
+                ? CurrentTheme.daySectionVerticalPaddingExpanded : CurrentTheme.daySectionVerticalPaddingCollapsed
+            let bottomPadding = expanded
+                ? CurrentTheme.daySectionVerticalPaddingExpanded : CurrentTheme.daySectionVerticalPaddingCollapsed
+            let top = frame.minY + topPadding
+            var bottom = frame.maxY - bottomPadding
+            if expanded, let collectionView, let editor = editor(forDayID: document.id), editor.isGeometrySettled,
+               let manager = editor.layoutManager, let container = editor.textContainer {
+                // Use full laid-out line fragments, including the editable
+                // final empty line. This removes minimum-height/inset slack
+                // without cutting off a partially visible line or descender.
+                var textBottom = manager.usedRect(for: container).maxY
+                if manager.numberOfGlyphs > 0 {
+                    textBottom = max(textBottom, manager.lineFragmentRect(forGlyphAt: manager.numberOfGlyphs - 1,
+                        effectiveRange: nil, withoutAdditionalLayout: true).maxY)
+                }
+                if manager.extraLineFragmentTextContainer === container {
+                    textBottom = max(textBottom, manager.extraLineFragmentRect.maxY)
+                }
+                let editorBottom = editor.convert(NSPoint(x: 0, y: editor.textContainerOrigin.y + textBottom),
+                                                  to: collectionView).y
+                bottom = min(bottom, max(top + CurrentTheme.dayDividerIntrinsicHeight, editorBottom))
+            }
+            return NSRect(x: frame.minX, y: top, width: frame.width, height: max(0, bottom - top))
         }
 
         private func restore(_ anchor: ScrollAnchor, adjustsForReflow: Bool = false) {

@@ -5,6 +5,32 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct TimelineRestorationTests {
+    @Test func changingOnlyTheDisplayedDayPreservesTheScrollRequestAndAnchor() throws {
+        let fixture = try Fixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let controller = fixture.makeController()
+        let anchor = MarkdownReadingAnchor.captureSource(in: "", at: 0, lineOffset: 44.5)
+        let geometric = StreamViewState(dayKey: fixture.todayKey, scrollDayKey: fixture.todayKey,
+                                       scrollOffset: 86, selectionLocation: 0, readingAnchor: anchor)
+        controller.updateViewState(geometric)
+        #expect(controller.visibleDate == fixture.today)
+        let request = controller.scrollRequest
+        var displayed = geometric
+        displayed.visibleDayKey = "2026-09-27"
+        var notifications = 0
+        let observation = controller.objectWillChange.sink { notifications += 1 }
+        controller.updateViewState(displayed)
+        #expect(notifications == 1)
+        #expect(controller.scrollRequest == request)
+        #expect(controller.currentViewState.scrollDayKey == geometric.scrollDayKey)
+        #expect(controller.currentViewState.scrollOffset == geometric.scrollOffset)
+        #expect(controller.currentViewState.readingAnchor == anchor)
+        #expect(controller.visibleDate == fixture.date("2026-09-27"))
+        #expect(controller.flushAllSaves())
+        #expect(try fixture.store.loadSession().views[fixture.stream.id]?.visibleDayKey == "2026-09-27")
+        withExtendedLifetime(observation) {}
+    }
+
     @Test func closeFlushPersistsLatestScrollStateBeforeTheDebounceRuns() throws {
         let fixture = try Fixture()
         defer { try? FileManager.default.removeItem(at: fixture.root) }
@@ -226,6 +252,7 @@ struct TimelineRestorationTests {
     @Test func legacyViewStateDecodesWithoutDiscardingItsSavedPosition() throws {
         let legacy = Data(#"{"dayKey":"2026-09-28","scrollDayKey":"2021-02-03","scrollOffset":37.5,"selectionLocation":8,"selectionLength":3,"minimizedDayKeys":["2020-01-02"]}"#.utf8)
         let state = try JSONDecoder().decode(StreamViewState.self, from: legacy)
+        #expect(state.visibleDayKey == nil)
         #expect(state.dayKey == "2026-09-28")
         #expect(state.scrollDayKey == "2021-02-03")
         #expect(state.scrollOffset == 37.5)

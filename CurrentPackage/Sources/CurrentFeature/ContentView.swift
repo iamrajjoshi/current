@@ -48,7 +48,9 @@ public struct ContentView: View {
                 }
                 timeline
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // Constrain the detail itself so reopening the sidebar reflows this
+            // column instead of adding its width to a window-wide minimum.
+            .frame(minWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
             .background(CurrentTheme.pageBackground)
             .overlay(alignment: .topTrailing) {
                 if workspace.focusMode {
@@ -59,7 +61,7 @@ public struct ContentView: View {
             .toolbar(workspace.focusMode ? .hidden : .visible, for: .windowToolbar)
         }
         .navigationSplitViewStyle(.balanced)
-        .frame(minWidth: 820, minHeight: 560)
+        .frame(minHeight: 560)
         .preferredColorScheme(workspace.appearance.colorScheme)
         .onAppear {
             controller.apply(configuration: configurationStore.configuration)
@@ -174,8 +176,7 @@ public struct ContentView: View {
     }
 
     private var visibleDate: Date {
-        controller.currentViewState.scrollDayKey.flatMap(controller.store.date(for:))
-            ?? controller.activeDate ?? controller.today
+        controller.visibleDate
     }
 
     private var streamBreadcrumb: some View {
@@ -732,8 +733,7 @@ public struct CurrentCommands: Commands {
 
             Button("Jump to Date…") {
                 workspace.focusMode = false
-                workspace.selectedDate = controller.currentViewState.scrollDayKey.flatMap(controller.store.date(for:))
-                    ?? controller.activeDate ?? controller.today
+                workspace.selectedDate = controller.visibleDate
                 workspace.showsDatePicker = true
             }
 

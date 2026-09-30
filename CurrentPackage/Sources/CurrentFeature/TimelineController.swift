@@ -711,10 +711,9 @@ public final class TimelineController: ObservableObject {
     }
 
     private func existingDates(before date: Date, in stream: Stream, limit: Int) -> [Date] {
-        let visibleDates = Set(windowState.dates)
-        return store.existingDayDates(in: stream, before: date, limit: max(limit + visibleDates.count, limit))
-            .filter { !visibleDates.contains($0) }
-            .prefix(limit)
+        // Recent-window resets must retain imported notes already on screen.
+        // Pagination's strict date cutoff already excludes its retained days.
+        return store.existingDayDates(in: stream, before: date, limit: limit)
             .compactMap { date in
                 loadDocument(for: date, in: stream, createToday: false)?.date
             }
@@ -772,6 +771,10 @@ extension TimelineController {
     public var currentViewState: StreamViewState {
         guard let id = stream?.id else { return StreamViewState() }
         return session.views[id] ?? StreamViewState()
+    }
+    public var visibleDate: Date {
+        (currentViewState.visibleDayKey ?? currentViewState.scrollDayKey).flatMap(store.date(for:))
+            ?? activeDate ?? today
     }
 
     @discardableResult
@@ -892,7 +895,9 @@ extension TimelineController {
     public func updateViewState(_ view: StreamViewState, streamID: UUID, libraryID: String) {
         guard libraryID == store.libraryID, streams.contains(where: { $0.id == streamID }) else { return }
         guard session.views[streamID] != view else { return }
-        if stream?.id == streamID, session.views[streamID]?.scrollDayKey != view.scrollDayKey {
+        if stream?.id == streamID,
+           session.views[streamID]?.scrollDayKey != view.scrollDayKey
+            || session.views[streamID]?.visibleDayKey != view.visibleDayKey {
             objectWillChange.send()
         }
         session.views[streamID] = view
@@ -1165,6 +1170,9 @@ extension TimelineController {
     }
 
     private func persistSession() {
+        // Before bootstrap the in-memory session has not read this library.
+        // Startup configuration or an early close must not overwrite it.
+        guard isBootstrapped else { return }
         pendingSessionSave?.cancel()
         pendingSessionSave = nil
         session.selectedStreamID = stream?.id

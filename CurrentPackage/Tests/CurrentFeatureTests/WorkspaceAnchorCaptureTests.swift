@@ -6,6 +6,151 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct WorkspaceAnchorCaptureTests {
+    @Test(arguments: [75.0, 86.0])
+    func visibleDateSkipsEmptyTodayWhitespaceWithoutChangingTheReopenedViewport(offset: Double) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("current-date-boundary-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = calendar.date(from: DateComponents(year: 2026, month: 9, day: 30))!
+        let store = StreamStore(libraryRoot: root, calendar: calendar)
+        let stream = try store.defaultStream()
+        let source = (0..<25).map { "Line \($0): Read the release checklist carefully.\n" }.joined()
+        for age in 1...2 {
+            var document = try store.loadDay(calendar.addingDays(-age, to: today), in: stream)
+            document.text = source
+            document.isDirty = true
+            _ = try store.saveDay(document)
+        }
+        let controller = TimelineController(store: store, recentDayCount: 3, autosaveDelay: 60, now: today)
+        controller.bootstrapIfNeeded(now: today)
+        controller.setActiveDate(calendar.addingDays(-1, to: today))
+        // This is a reading-session test. Restore its selection without taking
+        // the process-wide active editor from concurrently running native suites.
+        controller.updateViewState(StreamViewState(dayKey: "2026-09-29", scrollDayKey: "2026-09-30",
+                                                   selectionLocation: 14, selectionLength: 5, editorHadFocus: false))
+        let (window, host) = mount(controller: controller, restoresRequest: true)
+        defer { window.close() }
+        try await waitUntil(host, "All three date rows must finish native layout") {
+            guard let collection: NSCollectionView = find(in: host), hasThreeRows(collection),
+                  let item = collection.item(at: IndexPath(item: 1, section: 0)),
+                  let editor: MarkdownTextView = find(in: item.view) else { return false }
+            let mounted = editors(in: collection)
+            return collection.alphaValue == 1 && mounted.count >= 2 && mounted.allSatisfy(\.isGeometrySettled)
+                && editor.selectedRange() == NSRange(location: 14, length: 5)
+        }
+        let collection: NSCollectionView = try #require(find(in: host))
+        let scroll = try #require(collection.enclosingScrollView)
+        let coordinator = try #require(collection.delegate as? TimelineCollectionView.Coordinator)
+        let todayRow = try #require(collection.layoutAttributesForItem(at: IndexPath(item: 0, section: 0)))
+        let yesterdayRow = try #require(collection.layoutAttributesForItem(at: IndexPath(item: 1, section: 0)))
+        #expect(todayRow.frame.height == 94)
+        let todayItem = try #require(collection.item(at: IndexPath(item: 0, section: 0)))
+        let todayEditor: MarkdownTextView = try #require(find(in: todayItem.view))
+        let yesterdayItem = try #require(collection.item(at: IndexPath(item: 1, section: 0)))
+        let yesterdayEditor: MarkdownTextView = try #require(find(in: yesterdayItem.view))
+        #expect(yesterdayEditor.selectedRange() == NSRange(location: 14, length: 5))
+        #expect(window.firstResponder !== yesterdayEditor)
+        try await settle(host)
+
+        // Even a sliver of the final editable line still belongs to Today.
+        let requestID = controller.scrollRequest?.id
+        let storage = try #require(todayEditor.textStorage as? MarkdownTextStorage)
+        let parseCount = storage.parseCount
+        let manager = try #require(todayEditor.layoutManager)
+        let lineBottom = todayEditor.convert(NSPoint(x: 0,
+            y: todayEditor.textContainerOrigin.y + manager.extraLineFragmentRect.maxY), to: collection).y
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: lineBottom - 0.5))
+        coordinator.captureFinalPosition(saveNotes: false)
+        #expect(controller.currentViewState.visibleDayKey == "2026-09-30")
+
+        let expectedY = todayRow.frame.minY + offset
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: expectedY))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        try await settle(host)
+        coordinator.captureFinalPosition()
+        let saved = controller.currentViewState
+        #expect(saved.visibleDayKey == "2026-09-29")
+        #expect(saved.scrollDayKey == "2026-09-30")
+        #expect(abs(saved.scrollOffset - offset) < 0.001)
+        #expect(saved.dayKey == "2026-09-29")
+        #expect(saved.selectionLocation == 14 && saved.selectionLength == 5)
+        #expect(!((saved.editorHadFocus) ?? true))
+        #expect(abs(scroll.contentView.bounds.minY - expectedY) < 0.001)
+        #expect(controller.scrollRequest?.id == requestID)
+        #expect(storage.parseCount == parseCount)
+        // At offset86, rebasing to yesterday would give -8; at75 it
+        // would give -19 and clamp on reopen if yesterday began the window.
+        #expect(abs((expectedY - yesterdayRow.frame.minY) - (offset - 94)) < 0.001)
+        #expect(try store.loadSession().views[stream.id] == saved)
+        window.close()
+
+        let reopened = TimelineController(store: StreamStore(libraryRoot: root, calendar: calendar),
+                                          recentDayCount: 3, autosaveDelay: 60, now: today)
+        reopened.bootstrapIfNeeded(now: today)
+        #expect(reopened.currentViewState == saved)
+        let (reopenedWindow, reopenedHost) = mount(controller: reopened, restoresRequest: true)
+        defer { reopenedWindow.close() }
+        try await waitUntil(reopenedHost, "Reopening must restore viewport, visible date and native selection") {
+            guard let collection: NSCollectionView = find(in: reopenedHost), hasThreeRows(collection),
+                  let item = collection.item(at: IndexPath(item: 1, section: 0)),
+                  let editor: MarkdownTextView = find(in: item.view) else { return false }
+            return collection.alphaValue == 1 && editor.isGeometrySettled
+                && editor.selectedRange() == NSRange(location: 14, length: 5)
+                && reopened.currentViewState.visibleDayKey == "2026-09-29"
+        }
+        let reopenedCollection: NSCollectionView = try #require(find(in: reopenedHost))
+        let reopenedScroll = try #require(reopenedCollection.enclosingScrollView)
+        #expect(abs(reopenedScroll.contentView.bounds.minY - expectedY) < 0.1)
+        #expect(reopened.currentViewState.scrollDayKey == "2026-09-30")
+        #expect(reopened.activeDocument?.text == source)
+        #expect(reopenedWindow.firstResponder is MarkdownTextView == false)
+    }
+
+    @Test(arguments: [false, true])
+    func collapsedHeadersAndEmptyRunControlsKeepTheirDateWhileVisible(emptyRun: Bool) async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("current-collapsed-date-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let today = calendar.date(from: DateComponents(year: 2026, month: 9, day: 30))!
+        let store = StreamStore(libraryRoot: root, calendar: calendar)
+        let stream = try store.defaultStream()
+        let count = emptyRun ? 3 : 2
+        for age in 1...count {
+            var document = try store.loadDay(calendar.addingDays(-age, to: today), in: stream)
+            document.text = emptyRun && age < count ? "" : (0..<25).map { "Line \($0): Review the checklist.\n" }.joined()
+            document.isDirty = true
+            _ = try store.saveDay(document)
+        }
+        let controller = TimelineController(store: store, recentDayCount: count + 1, autosaveDelay: 60, now: today)
+        controller.bootstrapIfNeeded(now: today)
+        if !emptyRun { controller.toggleDayMinimized(calendar.addingDays(-1, to: today)) }
+        let (window, host) = mount(controller: controller)
+        defer { window.close() }
+        try await waitUntil(host, "Collapsed days and empty runs must finish layout") {
+            guard let collection: NSCollectionView = find(in: host), hasThreeRows(collection) else { return false }
+            return collection.alphaValue == 1 && editors(in: collection).allSatisfy(\.isGeometrySettled)
+        }
+        let collection: NSCollectionView = try #require(find(in: host))
+        let scroll = try #require(collection.enclosingScrollView)
+        let coordinator = try #require(collection.delegate as? TimelineCollectionView.Coordinator)
+        let row = try #require(collection.layoutAttributesForItem(at: IndexPath(item: 1, section: 0)))
+        #expect(row.frame.height == (emptyRun ? 30 : 36))
+        let contentBottom = emptyRun ? row.frame.maxY
+            : row.frame.minY + CurrentTheme.daySectionVerticalPaddingExpanded + CurrentTheme.dayDividerIntrinsicHeight
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: contentBottom - 0.5))
+        coordinator.captureFinalPosition(saveNotes: false)
+        #expect(controller.currentViewState.visibleDayKey == "2026-09-29")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: contentBottom + 0.5))
+        coordinator.captureFinalPosition(saveNotes: false)
+        #expect(controller.currentViewState.visibleDayKey == (emptyRun ? "2026-09-27" : "2026-09-28"))
+        if !emptyRun {
+            #expect(controller.currentViewState.scrollDayKey == "2026-09-29")
+            #expect(controller.currentViewState.minimizedDayKeys == ["2026-09-29"])
+        }
+    }
+
     @Test func immediateEditAndClosePreserveReadingAnchorAndLatestSelection() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("current-anchor-capture-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

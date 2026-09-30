@@ -61,6 +61,8 @@ struct StreamRecord: Codable {
 public struct StreamViewState: Codable, Equatable, Sendable {
     public var dayKey: String?
     public var scrollDayKey: String?
+    /// The first visible content date can differ from the row anchoring the viewport in whitespace.
+    public var visibleDayKey: String?
     public var scrollOffset: Double
     public var selectionLocation: Int
     public var selectionLength: Int
@@ -70,9 +72,11 @@ public struct StreamViewState: Codable, Equatable, Sendable {
 
     public init(dayKey: String? = nil, scrollDayKey: String? = nil, scrollOffset: Double = 0,
                 selectionLocation: Int = 0, selectionLength: Int = 0, minimizedDayKeys: Set<String> = [],
-                readingAnchor: MarkdownReadingAnchor? = nil, editorHadFocus: Bool? = nil) {
+                readingAnchor: MarkdownReadingAnchor? = nil, editorHadFocus: Bool? = nil,
+                visibleDayKey: String? = nil) {
         self.dayKey = dayKey
         self.scrollDayKey = scrollDayKey
+        self.visibleDayKey = visibleDayKey
         self.scrollOffset = scrollOffset
         self.selectionLocation = selectionLocation
         self.selectionLength = selectionLength
