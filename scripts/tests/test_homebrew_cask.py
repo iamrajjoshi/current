@@ -70,7 +70,7 @@ class HomebrewCaskTests(unittest.TestCase):
   desc "Daily Markdown notes organized in streams"
   homepage "https://github.com/iamrajjoshi/current"
 
-  depends_on macos: ">= :sonoma"
+  depends_on macos: :sonoma
 
   app "Current.app"
 end

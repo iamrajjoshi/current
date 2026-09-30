@@ -1,6 +1,6 @@
 # Releases and upgrades
 
-The next planned version is **0.3.0**. Its signed-release workflow is prepared; it has not yet produced a validated, published signed release. The existing **0.2.0** release is unsigned. At preparation time, no valid local signing identity was available and only `HOMEBREW_TAP_TOKEN` was configured in GitHub. The Apple credentials below are still required.
+[Current 0.3.0](https://github.com/iamrajjoshi/current/releases/tag/v0.3.0) was published on **September 30, 2026**, with Developer ID signing, accepted Apple notarization, and a stapled ticket. Its [release workflow](https://github.com/iamrajjoshi/current/actions/runs/36734740088) passed the publication gates for commit `38b5ecf` and updated the Homebrew cask successfully. Historical version **0.2.0** is unsigned.
 
 Releases are manual. Pull requests and pushes to `main` run CI without creating app releases. CI can also be dispatched on a development branch. The release workflow publishes the selected branch's commit; it does not merge that branch.
 
@@ -29,17 +29,17 @@ Enter the remaining values through GitHub Settings or the interactive prompt fro
 
 ## Run a release
 
-First push the intended source and workflow changes to the selected branch. Version input must have exactly three numeric components, such as `0.3.0`; prerelease suffixes are not accepted as the app's marketing version. Apple specifies that format for [CFBundleShortVersionString](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleshortversionstring).
+First push the intended source and workflow changes to the selected branch. Choose an unused version with exactly three numeric components, such as `0.3.1`; prerelease suffixes are not accepted as the app's marketing version. Apple specifies that format for [CFBundleShortVersionString](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleshortversionstring).
 
 The existing `Release` workflow is registered on the default branch; [GitHub's manual-dispatch instructions](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow) allow selecting another branch with `--ref`. For the current development branch:
 
 ```sh
-gh workflow run release.yml --repo iamrajjoshi/current --ref raj--inkpad--stream-workspace -f version=0.3.0
+gh workflow run release.yml --repo iamrajjoshi/current --ref raj--inkpad--stream-workspace -f version=X.Y.Z
 gh run list --repo iamrajjoshi/current --workflow release.yml --branch raj--inkpad--stream-workspace --limit 5
 gh run watch RUN_ID --repo iamrajjoshi/current --exit-status
 ```
 
-Replace `RUN_ID` with the run returned by the listing. Confirm its commit SHA before treating the release as the requested build.
+Replace `X.Y.Z` with the chosen numeric version and `RUN_ID` with the run returned by the listing. Confirm its commit SHA before treating the release as the requested build.
 
 The workflow runs package tests and feature checks, builds with manual Developer ID signing, hardened runtime and a secure timestamp, then invokes `scripts/notarize-app.sh`. The release gates verify the signature, bundle/version/team, required architectures, and absence of an enabled `get-task-allow` entitlement.
 
@@ -80,7 +80,7 @@ shellcheck scripts/notarize-app.sh scripts/update-homebrew-cask.sh
 actionlint .github/workflows/release.yml .github/workflows/ci.yml
 ```
 
-The tests use temporary app/tap fixtures and simulate Apple's signing and notarization responses. They check failure handling, final archive bytes, checksums, and retry behavior. They do not establish actual Developer ID validity or Apple acceptance; the real release job must still pass those checks.
+The tests use temporary app/tap fixtures and mock Apple's signing and notarization responses. The architecture check also compiles a universal Mach-O fixture and runs real `lipo`, including rejection of a thin binary. These tests cover failure handling, final archive bytes, checksums, and retry behavior; actual Developer ID validity and Apple acceptance are verified by the release job.
 
 ## Upgrade an installed app
 

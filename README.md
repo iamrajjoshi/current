@@ -81,7 +81,7 @@ Pushes to `main` deploy the static export to GitHub Pages with `.github/workflow
 
 ### Releases and upgrades
 
-Releases run manually through GitHub Actions. The prepared `0.3.0` workflow requires Developer ID signing and Apple notarization; the existing `0.2.0` release is unsigned. See [Release setup and upgrade instructions](docs/releases.md) for credentials, branch selection, validation gates, and Homebrew retries.
+[Current 0.3.0](https://github.com/iamrajjoshi/current/releases/tag/v0.3.0) was published on September 30, 2026, signed with Developer ID and notarized by Apple. Historical version `0.2.0` is unsigned. Releases run manually through GitHub Actions; see [Release setup and upgrade instructions](docs/releases.md) for credentials, branch selection, validation gates, and Homebrew retries.
 
 ### Build and validate
 
