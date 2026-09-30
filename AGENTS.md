@@ -14,7 +14,7 @@
 - PRs and pushes should not create app releases. The regular `CI` workflow is the PR/push validation path.
 - New releases require a Developer ID Application signature, hardened runtime, secure timestamp, accepted Apple notarization, and a stapled ticket. There is no unsigned fallback.
 - The workflow validates the final ZIP before publishing `Current-<version>.zip` and its checksum at `v<version>`. A separate Homebrew job downloads those published bytes and verifies the checksum before updating the cask; rerun failed jobs to retry that update without rebuilding the app.
-- [Version `0.3.0`](https://github.com/iamrajjoshi/current/releases/tag/v0.3.0) was published on September 30, 2026 with Developer ID signing, Apple notarization, and a stapled ticket. Historical version `0.2.0` is unsigned. See [docs/releases.md](docs/releases.md) for release setup and upgrades.
+- [Version `0.3.1`](https://github.com/iamrajjoshi/current/releases/tag/v0.3.1) was published on September 30, 2026 with Developer ID signing, Apple notarization, and a stapled ticket. Historical version `0.2.0` is unsigned. See [docs/releases.md](docs/releases.md) for release setup and upgrades.
 - Dispatch from the intended branch explicitly; releasing does not imply merging that branch. Never put signing certificates, private keys, or passwords in the repository or chat.
 - The app repository is public so Homebrew can download GitHub Release artifacts without authentication.
 

@@ -1,6 +1,6 @@
 # Releases and upgrades
 
-[Current 0.3.0](https://github.com/iamrajjoshi/current/releases/tag/v0.3.0) was published on **September 30, 2026**, with Developer ID signing, accepted Apple notarization, and a stapled ticket. Its [release workflow](https://github.com/iamrajjoshi/current/actions/runs/36734740088) passed the publication gates for commit `38b5ecf` and updated the Homebrew cask successfully. Historical version **0.2.0** is unsigned.
+[Current 0.3.1](https://github.com/iamrajjoshi/current/releases/tag/v0.3.1) was published on **September 30, 2026**, with Developer ID signing, accepted Apple notarization, and a stapled ticket. Its [release workflow](https://github.com/iamrajjoshi/current/actions/runs/36742014892) passed the publication gates for commit `73ea628` and updated the Homebrew cask. Historical version **0.2.0** is unsigned.
 
 Releases are manual. Pull requests and pushes to `main` run CI without creating app releases. CI can also be dispatched on a development branch. The release workflow publishes the selected branch's commit; it does not merge that branch.
 
