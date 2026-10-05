@@ -98,19 +98,26 @@ struct MarkdownReadingAnchorTests {
         }
         #expect(!editor.view.isGeometrySettled)
         coordinator.remeasure(in: scroll)
-        try await Task.sleep(for: .milliseconds(40))
+        try await waitForLayoutNotifications(1, from: observer)
         #expect(editor.view.isGeometrySettled)
         #expect(observer.count == 1)
         let height = editor.manager.usedRect(for: editor.container).height
         editor.storage.replaceCharacters(in: NSRange(location: editor.storage.length, length: 0), with: " words")
         #expect(!editor.view.isGeometrySettled)
         coordinator.remeasure(in: scroll)
-        try await Task.sleep(for: .milliseconds(40))
+        try await waitForLayoutNotifications(2, from: observer)
         #expect(editor.view.isGeometrySettled)
         #expect(observer.count == 2)
         #expect(editor.manager.usedRect(for: editor.container).height == height)
         editor.container.containerSize.width = 300
         #expect(!editor.view.isGeometrySettled)
+    }
+
+    @MainActor private func waitForLayoutNotifications(_ expectedCount: Int, from observer: LayoutObserver) async throws {
+        for _ in 0..<100 {
+            if observer.count >= expectedCount { return }
+            try await Task.sleep(for: .milliseconds(20))
+        }
     }
 
     @MainActor private final class LayoutObserver: NSObject {
